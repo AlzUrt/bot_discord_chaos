@@ -19,8 +19,10 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Créer le bot
 intents = discord.Intents.default()
 intents.message_content = True
-intents.voice_states = True  # Ajouter les voice_states
-intents.guilds = True  # Ajouter les guilds
+intents.voice_states = True
+intents.guilds = True
+intents.members = True  # Important pour les informations des membres
+intents.presences = True  # Important pour le statut des utilisateurs
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Historique des 10 dernières phrases générées
@@ -55,86 +57,197 @@ def build_chaos_prompt():
 
 async def play_audio(ctx, audio_file="kaamelott.mp3"):
     """Connecte le bot au canal vocal et joue un son"""
+    import traceback
+    import subprocess
+    
+    print("\n" + "="*60)
+    print("[AUDIO] 🔍 DÉMARRAGE DEBUG COMPLET")
+    print("="*60)
+    
     voice_client = None
     
     try:
-        # Vérifier que l'utilisateur est dans un canal vocal
-        if ctx.author.voice is None or ctx.author.voice.channel is None:
-            print("[AUDIO] ❌ L'utilisateur n'est pas dans un canal vocal")
+        # ===== ÉTAPE 1 : VÉRIFICATIONS PRÉALABLES =====
+        print("\n[AUDIO] 📋 ÉTAPE 1: Vérifications préalables")
+        print("-" * 60)
+        
+        # Vérifier FFmpeg
+        try:
+            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5)
+            ffmpeg_version = result.stdout.decode().split('\n')[0]
+            print(f"[AUDIO] ✅ FFmpeg trouvé: {ffmpeg_version}")
+        except Exception as e:
+            print(f"[AUDIO] ❌ FFmpeg non trouvé: {e}")
+            print(f"[AUDIO] ⚠️  Installez FFmpeg et ajoutez-le au PATH")
             return
         
-        # Vérifier que le fichier audio existe
-        if not os.path.exists(audio_file):
-            print(f"[AUDIO] ❌ Le fichier `{audio_file}` n'existe pas!")
+        # Vérifier que l'utilisateur est dans un canal vocal
+        print(f"[AUDIO] Vérification canal vocal utilisateur...")
+        print(f"  - ctx.author.voice: {ctx.author.voice}")
+        
+        if ctx.author.voice is None:
+            print(f"[AUDIO] ❌ ctx.author.voice est None")
+            return
+        
+        print(f"  - ctx.author.voice.channel: {ctx.author.voice.channel}")
+        
+        if ctx.author.voice.channel is None:
+            print(f"[AUDIO] ❌ L'utilisateur n'est pas dans un canal vocal")
             return
         
         voice_channel = ctx.author.voice.channel
+        print(f"[AUDIO] ✅ Canal vocal trouvé: {voice_channel.name} (ID: {voice_channel.id})")
+        print(f"  - Type de canal: {type(voice_channel)}")
+        print(f"  - Guild: {ctx.guild.name} (ID: {ctx.guild.id})")
         
-        # Nettoyer les anciennes connexions
-        for vc in bot.voice_clients:
+        # Vérifier le fichier audio
+        print(f"\n[AUDIO] Vérification fichier audio...")
+        audio_path = os.path.abspath(audio_file)
+        print(f"  - Chemin fourni: {audio_file}")
+        print(f"  - Chemin absolu: {audio_path}")
+        print(f"  - Fichier existe: {os.path.exists(audio_path)}")
+        print(f"  - Taille: {os.path.getsize(audio_path) if os.path.exists(audio_path) else 'N/A'} bytes")
+        
+        if not os.path.exists(audio_path):
+            print(f"[AUDIO] ❌ Le fichier n'existe pas!")
+            return
+        
+        # ===== ÉTAPE 2 : NETTOYAGE CONNEXIONS EXISTANTES =====
+        print(f"\n[AUDIO] 📋 ÉTAPE 2: Nettoyage des connexions existantes")
+        print("-" * 60)
+        print(f"[AUDIO] Nombre de voice_clients actuels: {len(bot.voice_clients)}")
+        
+        for i, vc in enumerate(bot.voice_clients):
+            print(f"  [{i}] Guild: {vc.guild.name}, Connecté: {vc.is_connected()}")
             if vc.guild == ctx.guild:
+                print(f"      → Déconnexion de {vc.guild.name}...")
                 try:
                     await vc.disconnect(force=True)
-                except:
-                    pass
+                    print(f"      ✅ Déconnecté")
+                except Exception as e:
+                    print(f"      ❌ Erreur: {e}")
         
         await asyncio.sleep(1)
+        print(f"[AUDIO] Attente de 1s complétée")
         
-        # Se connecter
-        print(f"[AUDIO] Tentative de connexion à {voice_channel.name}...")
+        # ===== ÉTAPE 3 : CONNEXION AU CANAL VOCAL =====
+        print(f"\n[AUDIO] 📋 ÉTAPE 3: Connexion au canal vocal")
+        print("-" * 60)
+        print(f"[AUDIO] Tentative de connexion à '{voice_channel.name}'...")
+        
         try:
             voice_client = await voice_channel.connect(timeout=60, reconnect=False)
             print(f"[AUDIO] ✅ Connecté au canal vocal")
+            print(f"  - voice_client type: {type(voice_client)}")
+            print(f"  - is_connected(): {voice_client.is_connected()}")
+            print(f"  - Guild: {voice_client.guild.name}")
+        except asyncio.TimeoutError as e:
+            print(f"[AUDIO] ❌ Timeout lors de la connexion: {e}")
+            traceback.print_exc()
+            return
+        except discord.errors.ClientException as e:
+            print(f"[AUDIO] ❌ Erreur Discord: {e}")
+            print(f"  - Type: {type(e)}")
+            traceback.print_exc()
+            return
+        except IndexError as e:
+            print(f"[AUDIO] ❌ IndexError lors de la connexion: {e}")
+            print(f"  - Cela peut être un problème d'intents Discord")
+            traceback.print_exc()
+            return
         except Exception as e:
-            print(f"[AUDIO] ❌ Erreur connexion: {e}")
+            print(f"[AUDIO] ❌ Erreur inattendue: {type(e).__name__}: {e}")
+            traceback.print_exc()
             return
         
         await asyncio.sleep(0.5)
         
-        # Jouer le son avec chemin absolu
-        audio_path = os.path.abspath(audio_file)
-        print(f"[AUDIO] Chemin absolu: {audio_path}")
-        print(f"[AUDIO] Fichier existe: {os.path.exists(audio_path)}")
+        # ===== ÉTAPE 4 : CRÉATION DE L'AUDIO SOURCE =====
+        print(f"\n[AUDIO] 📋 ÉTAPE 4: Création de l'audio source")
+        print("-" * 60)
         
         try:
-            print(f"[AUDIO] Création de l'audio source...")
-            # Utiliser avant_options pour FFmpeg
-            audio_source = discord.FFmpegPCMAudio(
-                audio_path,
-                executable="ffmpeg"
-            )
-            print(f"[AUDIO] Audio source créée, lecture en cours...")
-            voice_client.play(audio_source)
+            print(f"[AUDIO] Création de FFmpegPCMAudio...")
+            print(f"  - Fichier: {audio_path}")
+            print(f"  - Executable: ffmpeg")
             
-            # Attendre la fin avec timeout
-            max_wait = 60  # 60 secondes max
-            elapsed = 0
-            while voice_client.is_playing() and elapsed < max_wait:
-                await asyncio.sleep(0.1)
-                elapsed += 0.1
-            
-            print(f"[AUDIO] ✅ Lecture terminée")
-            await asyncio.sleep(0.5)
+            audio_source = discord.FFmpegPCMAudio(audio_path)
+            print(f"[AUDIO] ✅ Audio source créée")
+            print(f"  - Type: {type(audio_source)}")
             
         except IndexError as e:
-            print(f"[AUDIO] ❌ Erreur IndexError (probablement FFmpeg): {e}")
-            print(f"[AUDIO] Vérifiez que FFmpeg est correctement installé")
+            print(f"[AUDIO] ❌ IndexError lors de la création: {e}")
+            print(f"  - FFmpeg peut ne pas être trouvé ou accessible")
+            print(f"  - Vérifiez que FFmpeg est dans le PATH")
+            traceback.print_exc()
+            return
+        except FileNotFoundError as e:
+            print(f"[AUDIO] ❌ Fichier non trouvé: {e}")
+            traceback.print_exc()
+            return
+        except Exception as e:
+            print(f"[AUDIO] ❌ Erreur: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            return
+        
+        # ===== ÉTAPE 5 : LECTURE DU SON =====
+        print(f"\n[AUDIO] 📋 ÉTAPE 5: Lecture du son")
+        print("-" * 60)
+        
+        try:
+            print(f"[AUDIO] Démarrage de la lecture...")
+            voice_client.play(audio_source)
+            print(f"[AUDIO] ✅ Lecture démarrée")
+            
+            # Attendre la fin avec timeout
+            max_wait = 60
+            elapsed = 0
+            check_interval = 0.5
+            
+            print(f"[AUDIO] Attente de la fin de la lecture (max {max_wait}s)...")
+            while voice_client.is_playing() and elapsed < max_wait:
+                await asyncio.sleep(check_interval)
+                elapsed += check_interval
+                if elapsed % 5 < check_interval:  # Print tous les ~5s
+                    print(f"[AUDIO] En cours... ({elapsed:.1f}s)")
+            
+            if elapsed >= max_wait:
+                print(f"[AUDIO] ⚠️  Timeout atteint ({max_wait}s)")
+            else:
+                print(f"[AUDIO] ✅ Lecture terminée ({elapsed:.1f}s)")
+            
+            await asyncio.sleep(0.5)
+            
         except Exception as e:
             print(f"[AUDIO] ❌ Erreur lors de la lecture: {type(e).__name__}: {e}")
+            traceback.print_exc()
         
     except Exception as e:
-        print(f"[AUDIO] ❌ Exception générale: {type(e).__name__}: {e}")
-        import traceback
+        print(f"[AUDIO] ❌ Exception générale non gérée: {type(e).__name__}: {e}")
         traceback.print_exc()
+        
     finally:
-        # Toujours déconnecter à la fin
-        if voice_client is not None and voice_client.is_connected():
-            try:
-                print("[AUDIO] Déconnexion...")
-                await voice_client.disconnect(force=True)
-                print("[AUDIO] ✅ Déconnecté")
-            except Exception as e:
-                print(f"[AUDIO] Erreur déconnexion: {e}")
+        # ===== ÉTAPE 6 : NETTOYAGE =====
+        print(f"\n[AUDIO] 📋 ÉTAPE 6: Nettoyage et déconnexion")
+        print("-" * 60)
+        
+        if voice_client is not None:
+            print(f"[AUDIO] voice_client existe")
+            print(f"  - is_connected(): {voice_client.is_connected()}")
+            
+            if voice_client.is_connected():
+                try:
+                    print(f"[AUDIO] Déconnexion...")
+                    await voice_client.disconnect(force=True)
+                    print(f"[AUDIO] ✅ Déconnecté")
+                except Exception as e:
+                    print(f"[AUDIO] ❌ Erreur déconnexion: {type(e).__name__}: {e}")
+        else:
+            print(f"[AUDIO] voice_client est None")
+        
+        print("\n" + "="*60)
+        print("[AUDIO] 🔍 FIN DEBUG")
+        print("="*60 + "\n")
 
 @bot.event
 async def on_ready():
