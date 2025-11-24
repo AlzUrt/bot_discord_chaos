@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 from collections import deque
 import asyncio
-import pyttsx3
+from elevenlabs.client import ElevenLabs
 import tempfile
 
 # Charger les variables d'environnement
@@ -14,9 +14,13 @@ load_dotenv()
 # Configuration
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
 
 # Initialiser Gemini
 genai.configure(api_key=GEMINI_API_KEY)
+
+# Initialiser ElevenLabs
+client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
 # Créer le bot
 intents = discord.Intents.default()
@@ -34,10 +38,11 @@ generated_history = deque(maxlen=10)
 last_prompt = None
 
 # ===== CONFIGURATION TTS =====
-# Voix disponibles: 0 = Voix par défaut, 1 = Voix alternative (si disponible)
-TTS_VOICE = 0  # Changez à 1 pour une autre voix si disponible
-TTS_SPEED = 150  # Vitesse en mots par minute (50-300, défaut ~200)
-TTS_VOLUME = 1.0  # Volume (0.0-1.0)
+# Voix disponibles: https://elevenlabs.io/docs/voices
+TTS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"  # Voice ID d'une voix (voir !voices)
+TTS_STABILITY = 0.5  # 0.0-1.0 (plus bas = plus de variation)
+TTS_SIMILARITY = 0.75  # 0.0-1.0 (plus haut = plus proche de la voix)
+TTS_SPEED = 1.0  # Vitesse de lecture (0.5-2.0)
 
 # Prompt de base pour !chaos
 BASE_CHAOS_PROMPT = """Génère un paragraphe de 3 à 4 phrases, sous forme d'histoire absurde qui enchaîne des ordres étranges. Le texte doit être dérangeant, choquant, absurde, mais chaque action doit avoir une justification interne, comme si tout obéissait à une logique bizarre mais cohérente dans cet univers.
@@ -110,7 +115,7 @@ async def play_audio(ctx, audio_file="kaamelott.mp3"):
                 pass
 
 async def play_tts(ctx, text):
-    """Génère et joue un fichier TTS avec pyttsx3"""
+    """Génère et joue un fichier TTS avec ElevenLabs"""
     voice_client = None
     temp_file = None
     
@@ -134,24 +139,22 @@ async def play_tts(ctx, text):
         voice_client = await voice_channel.connect(timeout=60, reconnect=False, self_deaf=True)
         await asyncio.sleep(0.2)
         
-        # Générer le TTS avec pyttsx3
-        engine = pyttsx3.init()
+        # Générer le TTS avec ElevenLabs
+        print(f"Génération TTS avec ElevenLabs...")
+        audio = client.text_to_speech.convert(
+            text=text,
+            voice_id=TTS_VOICE_ID,
+            model_id="eleven_multilingual_v2",
+            output_format="mp3_44100_128",
+        )
         
-        # Configurer les paramètres TTS
-        voices = engine.getProperty('voices')
-        if TTS_VOICE < len(voices):
-            engine.setProperty('voice', voices[TTS_VOICE].id)
-        
-        engine.setProperty('rate', TTS_SPEED)  # Vitesse
-        engine.setProperty('volume', TTS_VOLUME)  # Volume
-        
-        # Créer un fichier temporaire
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+        # Sauvegarder dans un fichier temporaire
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
             temp_file = tmp.name
+            for chunk in audio:
+                tmp.write(chunk)
         
-        # Sauvegarder l'audio dans le fichier temporaire
-        engine.save_to_file(text, temp_file)
-        engine.runAndWait()
+        print(f"TTS généré, lecture en cours...")
         
         # Jouer le son
         audio_source = discord.FFmpegPCMAudio(temp_file)
@@ -230,6 +233,108 @@ async def chaos(ctx):
         await ctx.send(f"❌ Erreur: {str(e)}")
 
 
+@bot.command(name='voices')
+async def voices(ctx):
+    """Affiche les voix disponibles"""
+    try:
+        voices = client.voices.get_all()
+        
+        response = "🎤 **Voix disponibles ElevenLabs:**\n\n"
+        for voice in voices:
+            response += f"`{voice.voice_id}` - {voice.name}\n"
+        
+        response += f"\n**Voix actuelle:** `{TTS_VOICE_ID}`\n"
+        response += f"\nUtilisez `!setvoice <voice_id>` pour changer"
+        
+        # Envoyer en plusieurs messages si trop long
+        if len(response) > 2000:
+            parts = [response[i:i+2000] for i in range(0, len(response), 2000)]
+            for part in parts:
+                await ctx.send(part)
+        else:
+            await ctx.send(response)
+            
+    except Exception as e:
+        await ctx.send(f"❌ Erreur: {e}")
+
+
+@bot.command(name='setvoice')
+async def setvoice(ctx, voice_id: str):
+    """Change la voix TTS ElevenLabs"""
+    global TTS_VOICE_ID
+    
+    try:
+        # Vérifier que la voix existe
+        voices = client.voices.get_all()
+        voice_ids = [v.voice_id for v in voices]
+        
+        if voice_id in voice_ids:
+            TTS_VOICE_ID = voice_id
+            # Trouver le nom de la voix
+            voice_name = next((v.name for v in voices if v.voice_id == voice_id), voice_id)
+            await ctx.send(f"✅ Voix changée à: **{voice_name}** (`{voice_id}`)")
+        else:
+            await ctx.send(f"❌ Voix invalide. Utilisez `!voices` pour voir les options.")
+    except Exception as e:
+        await ctx.send(f"❌ Erreur: {e}")
+
+
+@bot.command(name='setstability')
+async def setstability(ctx, stability: float):
+    """Change la stabilité de la voix (0.0-1.0)
+    Plus bas = plus de variation naturelle
+    Plus haut = plus de stabilité
+    """
+    global TTS_STABILITY
+    
+    if 0.0 <= stability <= 1.0:
+        TTS_STABILITY = stability
+        await ctx.send(f"✅ Stabilité changée à: `{stability}`")
+    else:
+        await ctx.send(f"❌ La stabilité doit être entre 0.0 et 1.0")
+
+
+@bot.command(name='setsimilarity')
+async def setsimilarity(ctx, similarity: float):
+    """Change la similarité de la voix (0.0-1.0)
+    Plus bas = différent de la voix de base
+    Plus haut = plus proche de la voix de base
+    """
+    global TTS_SIMILARITY
+    
+    if 0.0 <= similarity <= 1.0:
+        TTS_SIMILARITY = similarity
+        await ctx.send(f"✅ Similarité changée à: `{similarity}`")
+    else:
+        await ctx.send(f"❌ La similarité doit être entre 0.0 et 1.0")
+
+
+@bot.command(name='ttsstatus')
+async def ttsstatus(ctx):
+    """Affiche les paramètres TTS actuels"""
+    try:
+        voices = client.voices.get_all()
+        voice_name = next((v.name for v in voices if v.voice_id == TTS_VOICE_ID), "Inconnue")
+        
+        response = f"""
+🎤 **Paramètres TTS ElevenLabs:**
+• Voix: **{voice_name}** (`{TTS_VOICE_ID}`)
+• Stabilité: `{TTS_STABILITY}` (0=variation, 1=stable)
+• Similarité: `{TTS_SIMILARITY}` (0=différent, 1=identique)
+• Modèle: `eleven_multilingual_v2`
+
+📝 **Commandes TTS disponibles:**
+`!voices` - Voir les voix disponibles
+`!setvoice <id>` - Changer la voix
+`!setstability <0.0-1.0>` - Changer la stabilité
+`!setsimilarity <0.0-1.0>` - Changer la similarité
+`!ttsstatus` - Afficher ces paramètres
+"""
+        await ctx.send(response)
+    except Exception as e:
+        await ctx.send(f"❌ Erreur: {e}")
+
+
 @bot.command(name='prompt')
 async def prompt(ctx):
     """Affiche le dernier prompt qui a été envoyé à Gemini"""
@@ -250,95 +355,6 @@ async def prompt(ctx):
                 await ctx.send(f"```\n{chunk}\n```")
                 
             await ctx.send(f"✅ Prompt affiché en {len(chunks)} partie(s)")
-
-
-@bot.command(name='voices')
-async def voices(ctx):
-    """Affiche les voix disponibles"""
-    try:
-        engine = pyttsx3.init()
-        available_voices = engine.getProperty('voices')
-        
-        response = "🎤 **Voix disponibles:**\n"
-        for i, voice in enumerate(available_voices):
-            response += f"**{i}** - {voice.name}\n"
-        
-        response += f"\nVoix actuelle: **{TTS_VOICE}**\n"
-        response += f"Vitesse: **{TTS_SPEED}** mots/min\n"
-        response += f"Volume: **{TTS_VOLUME}**\n\n"
-        response += "Utilisez `!setvoice <numéro>` pour changer"
-        
-        await ctx.send(response)
-    except Exception as e:
-        await ctx.send(f"❌ Erreur: {e}")
-
-
-@bot.command(name='setvoice')
-async def setvoice(ctx, voice_id: int):
-    """Change la voix TTS (utilise !voices pour voir les options)"""
-    global TTS_VOICE
-    
-    try:
-        engine = pyttsx3.init()
-        available_voices = engine.getProperty('voices')
-        
-        if 0 <= voice_id < len(available_voices):
-            TTS_VOICE = voice_id
-            voice_name = available_voices[voice_id].name
-            await ctx.send(f"✅ Voix changée à: **{voice_name}**")
-        else:
-            await ctx.send(f"❌ Voix invalide. Utilisez `!voices` pour voir les options.")
-    except Exception as e:
-        await ctx.send(f"❌ Erreur: {e}")
-
-
-@bot.command(name='setspeed')
-async def setspeed(ctx, speed: int):
-    """Change la vitesse de lecture TTS (50-300 mots/min, défaut 150)"""
-    global TTS_SPEED
-    
-    if 50 <= speed <= 300:
-        TTS_SPEED = speed
-        await ctx.send(f"✅ Vitesse changée à: **{speed}** mots/min")
-    else:
-        await ctx.send(f"❌ La vitesse doit être entre 50 et 300 (défaut: 150)")
-
-
-@bot.command(name='setvolume')
-async def setvolume(ctx, volume: float):
-    """Change le volume TTS (0.0-1.0)"""
-    global TTS_VOLUME
-    
-    if 0.0 <= volume <= 1.0:
-        TTS_VOLUME = volume
-        await ctx.send(f"✅ Volume changé à: **{volume}**")
-    else:
-        await ctx.send(f"❌ Le volume doit être entre 0.0 et 1.0")
-
-
-@bot.command(name='ttsstatus')
-async def ttsstatus(ctx):
-    """Affiche les paramètres TTS actuels"""
-    try:
-        engine = pyttsx3.init()
-        voices = engine.getProperty('voices')
-        current_voice = voices[TTS_VOICE].name if TTS_VOICE < len(voices) else "Inconnue"
-        
-        response = f"""
-🎤 **Paramètres TTS actuels:**
-• Voix: **{current_voice}** (ID: {TTS_VOICE})
-• Vitesse: **{TTS_SPEED}** mots/min
-• Volume: **{TTS_VOLUME}**
-
-📝 **Commandes disponibles:**
-`!voices` - Voir les voix disponibles
-`!setvoice <id>` - Changer la voix
-`!setspeed <50-300>` - Changer la vitesse
-`!setvolume <0.0-1.0>` - Changer le volume
-"""
-        await ctx.send(response)
-    except Exception as e:
-        await ctx.send(f"❌ Erreur: {e}")
 
 
 # Lancer le bot
