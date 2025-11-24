@@ -145,8 +145,13 @@ async def chaos(ctx):
                 )
             )
             
+            # Vérifier que la réponse est valide
+            if not response or not response.text:
+                await ctx.send("⚠️ La réponse de Gemini était vide. Réessaye avec `!chaos`")
+                return
+            
             # Extraire le texte généré
-            generated_text = response.text
+            generated_text = response.text.strip()
             
             # Ajouter le texte à l'historique
             generated_history.append(generated_text)
@@ -158,7 +163,8 @@ async def chaos(ctx):
         await play_audio(ctx, "kaamelott.mp3")
             
     except Exception as e:
-        await ctx.send(f"Erreur lors de la génération du texte: {str(e)}")
+        print(f"[ERROR] Exception complète: {type(e).__name__}: {e}")
+        await ctx.send(f"❌ Erreur lors de la génération du texte: {str(e)}")
 
 
 @bot.command(name='prompt')
@@ -174,10 +180,10 @@ async def prompt(ctx):
         
         if len(last_prompt) <= max_length:
             # Si c'est court, on envoie directement
-            await ctx.send(f"📝 **Dernier prompt envoyé:**\n```\n{last_prompt}\n```")
+            await ctx.send(f"🔮 **Dernier prompt envoyé:**\n```\n{last_prompt}\n```")
         else:
             # Si c'est trop long, on découpe en plusieurs messages
-            await ctx.send("📝 **Dernier prompt envoyé:** (en plusieurs parties)")
+            await ctx.send("🔮 **Dernier prompt envoyé:** (en plusieurs parties)")
             
             # Découper le prompt en chunks
             chunks = [last_prompt[i:i + max_length] for i in range(0, len(last_prompt), max_length)]
