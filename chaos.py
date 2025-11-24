@@ -136,11 +136,21 @@ async def play_audio(ctx, audio_file="kaamelott.mp3"):
         print(f"[AUDIO] Tentative de connexion à '{voice_channel.name}'...")
         
         try:
-            voice_client = await voice_channel.connect(timeout=60, reconnect=False)
+            # FIX: Ajouter self_deaf=True pour éviter IndexError sur les modes de chiffrement
+            voice_client = await voice_channel.connect(timeout=60, reconnect=False, self_deaf=True)
             print(f"[AUDIO] ✅ Connecté au canal vocal")
             print(f"  - voice_client type: {type(voice_client)}")
             print(f"  - is_connected(): {voice_client.is_connected()}")
             print(f"  - Guild: {voice_client.guild.name}")
+        except IndexError as e:
+            print(f"[AUDIO] ❌ IndexError lors de la connexion: {e}")
+            print(f"[AUDIO] ℹ️  Ceci est un bug connu de discord.py avec les modes de chiffrement")
+            print(f"[AUDIO] 💡 Solutions possibles:")
+            print(f"     1. Mettez à jour discord.py: pip install --upgrade discord.py")
+            print(f"     2. Ou installez discord.py[voice]: pip install discord.py[voice]")
+            print(f"     3. Redémarrez le bot après mise à jour")
+            traceback.print_exc()
+            return
         except asyncio.TimeoutError as e:
             print(f"[AUDIO] ❌ Timeout lors de la connexion: {e}")
             traceback.print_exc()
@@ -148,11 +158,6 @@ async def play_audio(ctx, audio_file="kaamelott.mp3"):
         except discord.errors.ClientException as e:
             print(f"[AUDIO] ❌ Erreur Discord: {e}")
             print(f"  - Type: {type(e)}")
-            traceback.print_exc()
-            return
-        except IndexError as e:
-            print(f"[AUDIO] ❌ IndexError lors de la connexion: {e}")
-            print(f"  - Cela peut être un problème d'intents Discord")
             traceback.print_exc()
             return
         except Exception as e:
