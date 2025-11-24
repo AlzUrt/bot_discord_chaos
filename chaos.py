@@ -40,6 +40,7 @@ last_prompt = None
 # ===== CONFIGURATION TTS =====
 # Voix disponibles: https://elevenlabs.io/docs/voices
 TTS_VOICE_ID = "4TfTGcPwoefWe878B0rm"  # Voice ID de la voix sélectionnée
+TTS_SPEED = 1.0  # Vitesse de lecture (0.5 à 2.0, défaut 1.0)
 
 # Dictionnaire des voix prédéfinies (exemple)
 VOICES_PRESETS = {
@@ -134,12 +135,19 @@ async def play_tts(voice_client, text):
     
     try:
         # Générer le TTS avec ElevenLabs
-        print(f"Génération TTS avec ElevenLabs...")
+        print(f"Génération TTS avec ElevenLabs (vitesse: {TTS_SPEED})...")
         audio = client.text_to_speech.convert(
             text=text,
             voice_id=TTS_VOICE_ID,
             model_id="eleven_multilingual_v2",
             output_format="mp3_44100_128",
+            voice_settings={
+                "stability": 0.5,
+                "similarity_boost": 0.75,
+                "style": 0,
+                "use_speaker_boost": True
+            },
+            speech_rate=TTS_SPEED,
         )
         
         # Sauvegarder dans un fichier temporaire
@@ -223,12 +231,20 @@ async def chaos(ctx):
         # Lire le texte à voix haute SANS déconnecter
         await play_tts(voice_client, generated_text)
         
-        # Maintenant on peut déconnecter si on veut (optionnel)
-        # await voice_client.disconnect()
+        # Déconnecter automatiquement après avoir fini
+        await voice_client.disconnect()
             
     except Exception as e:
         print(f"Erreur: {type(e).__name__}: {e}")
         await ctx.send(f"❌ Erreur: {str(e)}")
+    finally:
+        # S'assurer qu'on est déconnecté en cas d'erreur
+        voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+        if voice_client and voice_client.is_connected():
+            try:
+                await voice_client.disconnect()
+            except:
+                pass
 
 @bot.command(name='disconnect')
 async def disconnect(ctx):
@@ -240,6 +256,33 @@ async def disconnect(ctx):
         await ctx.send("✅ Déconnecté du canal vocal")
     else:
         await ctx.send("❌ Le bot n'est pas connecté à un canal vocal")
+
+@bot.command(name='speed')
+async def speed(ctx, new_speed: float = None):
+    """Change la vitesse de lecture TTS
+    
+    Utilisation: !speed [vitesse]
+    Vitesse: 0.5 à 2.0 (défaut: 1.0)
+    - 0.5 = très lent
+    - 1.0 = normal
+    - 1.5 = rapide
+    - 2.0 = très rapide
+    
+    Exemple: !speed 1.5
+    """
+    global TTS_SPEED
+    
+    if new_speed is None:
+        await ctx.send(f"🎚️ **Vitesse actuelle:** {TTS_SPEED}x\n\nUtilise `!speed [valeur]` pour changer\nValeurs: 0.5 à 2.0")
+        return
+    
+    # Vérifier que la vitesse est dans les limites
+    if new_speed < 0.5 or new_speed > 2.0:
+        await ctx.send(f"❌ Vitesse invalide: `{new_speed}`\n\n**Plage autorisée:** 0.5 à 2.0")
+        return
+    
+    TTS_SPEED = new_speed
+    await ctx.send(f"✅ Vitesse de lecture définie à: **{TTS_SPEED}x**")
 
 @bot.command(name='voice')
 async def voice(ctx, voice_name: str = None):
@@ -319,12 +362,16 @@ async def help_voice(ctx):
 `!voice` - Affiche la voix actuelle et les voix disponibles
 `!voice [nom]` - Change la voix (default, bella, adam, arnold, george, callum)
 `!voice-custom [id]` - Change la voix avec un ID personnalisé d'ElevenLabs
+`!speed` - Affiche la vitesse actuelle
+`!speed [vitesse]` - Change la vitesse (0.5 à 2.0)
 `!disconnect` - Déconnecte le bot du canal vocal
 `!chaos` - Génère un texte absurde et le lit à voix haute
 `!prompt` - Affiche le dernier prompt envoyé à Gemini
 
-**Exemple:**
+**Exemples:**
 `!voice bella` - Change la voix à Bella
+`!speed 1.5` - Augmente la vitesse à 1.5x (plus rapide)
+`!speed 0.8` - Réduit la vitesse à 0.8x (plus lent)
 `!voice-custom pNInz6obpgDQGcFmaJgB` - Utilise un voice ID personnalisé
 """
     await ctx.send(help_text)
