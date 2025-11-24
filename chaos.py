@@ -73,7 +73,7 @@ IMPORTANT: Les phrases précédentes suivantes ont DÉJÀ été générées. Tu 
 {history}
 
 Ne me fait pas de liste, ne numérote pas les phrases, ne les sépare pas par des tirets. Écris simplement le paragraphe avec les phrases à la suite les unes des autres.
-Et commence le paragraphe par "Vive le chaos"."""
+Et commence le paragraphe par "Vive le chaos !"."""
 
 def build_chaos_prompt():
     """Construit le prompt en incluant l'historique"""
