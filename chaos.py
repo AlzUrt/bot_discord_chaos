@@ -39,7 +39,7 @@ last_prompt = None
 
 # ===== CONFIGURATION TTS =====
 # Voix disponibles: https://elevenlabs.io/docs/voices
-TTS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"  # Voice ID d'une voix (voir !voices)
+TTS_VOICE_ID = "4TfTGcPwoefWe878B0rm"  # Voice ID de la voix sélectionnée
 TTS_STABILITY = 0.5  # 0.0-1.0 (plus bas = plus de variation)
 TTS_SIMILARITY = 0.75  # 0.0-1.0 (plus haut = plus proche de la voix)
 TTS_SPEED = 1.0  # Vitesse de lecture (0.5-2.0)
