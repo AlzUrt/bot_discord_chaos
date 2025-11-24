@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from collections import deque
 import asyncio
 from elevenlabs.client import ElevenLabs
+from elevenlabs import VoiceSettings
 import tempfile
 
 # Charger les variables d'environnement
@@ -41,6 +42,9 @@ last_prompt = None
 # Voix disponibles: https://elevenlabs.io/docs/voices
 TTS_VOICE_ID = "4TfTGcPwoefWe878B0rm"  # Voice ID de la voix sélectionnée
 TTS_SPEED = 1.0  # Vitesse de lecture (0.5 à 2.0, défaut 1.0)
+TTS_STABILITY = 0.5  # Stabilité (0.0 à 1.0, défaut 0.5)
+TTS_STYLE = 0.0  # Style (0.0 à 1.0, défaut 0.0)
+TTS_USE_SPEAKER_BOOST = True  # Utiliser speaker boost
 
 # Dictionnaire des voix prédéfinies (exemple)
 VOICES_PRESETS = {
@@ -140,12 +144,19 @@ async def play_tts(voice_client, text):
             return False
         
         # Générer le TTS avec ElevenLabs
-        print(f"Génération TTS avec ElevenLabs...")
+        print(f"Génération TTS avec ElevenLabs (vitesse: {TTS_SPEED}, stabilité: {TTS_STABILITY})...")
         audio = client.text_to_speech.convert(
             text=text,
             voice_id=TTS_VOICE_ID,
             model_id="eleven_multilingual_v2",
             output_format="mp3_44100_128",
+            voice_settings=VoiceSettings(
+                stability=TTS_STABILITY,
+                similarity_boost=0.75,
+                style=TTS_STYLE,
+                use_speaker_boost=TTS_USE_SPEAKER_BOOST,
+                speed=TTS_SPEED,
+            ),
         )
         
         # Sauvegarder ENTIÈREMENT dans un fichier temporaire avant de jouer
@@ -321,16 +332,28 @@ async def disconnect(ctx):
 async def speed(ctx, new_speed: float = None):
     """Change la vitesse de lecture TTS
     
-    ⚠️ NOTE: La vitesse de lecture n'est pas encore disponible via l'API ElevenLabs.
-    Cette commande est en développement.
-    
     Utilisation: !speed [vitesse]
     Vitesse: 0.5 à 2.0 (défaut: 1.0)
+    - 0.5 = très lent
+    - 1.0 = normal
+    - 1.5 = rapide
+    - 2.0 = très rapide
+    
+    Exemple: !speed 1.5
     """
     global TTS_SPEED
     
-    await ctx.send("⚠️ **La vitesse de lecture n'est pas encore disponible via l'API ElevenLabs.**\n\nElevenLabs ne supporte pas actuellement le paramètre `speech_rate` dans l'API Python.\n\nAlternatives:\n- Modifie le texte généré avant la lecture\n- Utilise une voix différente qui parle naturellement plus vite")
-    return
+    if new_speed is None:
+        await ctx.send(f"🎚️ **Vitesse actuelle:** {TTS_SPEED}x\n\nUtilise `!speed [valeur]` pour changer\nValeurs: 0.5 à 2.0")
+        return
+    
+    # Vérifier que la vitesse est dans les limites
+    if new_speed < 0.5 or new_speed > 2.0:
+        await ctx.send(f"❌ Vitesse invalide: `{new_speed}`\n\n**Plage autorisée:** 0.5 à 2.0")
+        return
+    
+    TTS_SPEED = new_speed
+    await ctx.send(f"✅ Vitesse de lecture définie à: **{TTS_SPEED}x**")
 
 @bot.command(name='voice')
 async def voice(ctx, voice_name: str = None):
@@ -381,6 +404,84 @@ async def voice_custom(ctx, voice_id: str):
     TTS_VOICE_ID = voice_id
     await ctx.send(f"✅ Voix TTS définie à l'ID: `{voice_id}`")
 
+@bot.command(name='stability')
+async def stability(ctx, new_stability: float = None):
+    """Change la stabilité de la voix TTS
+    
+    Utilisation: !stability [valeur]
+    Stabilité: 0.0 à 1.0 (défaut: 0.5)
+    - 0.0 = très variable (plus d'émotion, moins stable)
+    - 0.5 = équilibré
+    - 1.0 = très stable (voix robote)
+    
+    Exemple: !stability 0.7
+    """
+    global TTS_STABILITY
+    
+    if new_stability is None:
+        await ctx.send(f"🎯 **Stabilité actuelle:** {TTS_STABILITY}\n\nUtilise `!stability [valeur]` pour changer\nValeurs: 0.0 à 1.0")
+        return
+    
+    if new_stability < 0.0 or new_stability > 1.0:
+        await ctx.send(f"❌ Stabilité invalide: `{new_stability}`\n\n**Plage autorisée:** 0.0 à 1.0")
+        return
+    
+    TTS_STABILITY = new_stability
+    await ctx.send(f"✅ Stabilité définie à: **{TTS_STABILITY}**")
+
+@bot.command(name='style')
+async def style(ctx, new_style: float = None):
+    """Change le style de la voix TTS
+    
+    Utilisation: !style [valeur]
+    Style: 0.0 à 1.0 (défaut: 0.0)
+    - 0.0 = neutre
+    - 0.5 = style modéré
+    - 1.0 = style accentué
+    
+    Exemple: !style 0.5
+    """
+    global TTS_STYLE
+    
+    if new_style is None:
+        await ctx.send(f"🎨 **Style actuel:** {TTS_STYLE}\n\nUtilise `!style [valeur]` pour changer\nValeurs: 0.0 à 1.0")
+        return
+    
+    if new_style < 0.0 or new_style > 1.0:
+        await ctx.send(f"❌ Style invalide: `{new_style}`\n\n**Plage autorisée:** 0.0 à 1.0")
+        return
+    
+    TTS_STYLE = new_style
+    await ctx.send(f"✅ Style défini à: **{TTS_STYLE}**")
+
+@bot.command(name='speaker-boost')
+async def speaker_boost(ctx, enable: str = None):
+    """Active ou désactive le speaker boost TTS
+    
+    Utilisation: !speaker-boost [on|off]
+    
+    Exemples:
+    !speaker-boost on
+    !speaker-boost off
+    """
+    global TTS_USE_SPEAKER_BOOST
+    
+    if enable is None:
+        status = "✅ Activé" if TTS_USE_SPEAKER_BOOST else "❌ Désactivé"
+        await ctx.send(f"🔊 **Speaker boost:** {status}\n\nUtilise `!speaker-boost [on|off]` pour changer")
+        return
+    
+    enable_lower = enable.lower()
+    
+    if enable_lower in ["on", "true", "1", "yes", "oui"]:
+        TTS_USE_SPEAKER_BOOST = True
+        await ctx.send(f"✅ Speaker boost **activé**")
+    elif enable_lower in ["off", "false", "0", "no", "non"]:
+        TTS_USE_SPEAKER_BOOST = False
+        await ctx.send(f"✅ Speaker boost **désactivé**")
+    else:
+        await ctx.send(f"❌ Valeur invalide: `{enable}`\n\nUtilise: `on` ou `off`")
+
 @bot.command(name='prompt')
 async def prompt(ctx):
     """Affiche le dernier prompt qui a été envoyé à Gemini"""
@@ -402,24 +503,64 @@ async def prompt(ctx):
                 
             await ctx.send(f"✅ Prompt affiché en {len(chunks)} partie(s)")
 
-@bot.command(name='help-voice')
-async def help_voice(ctx):
+@bot.command(name='tts-settings')
+async def tts_settings(ctx):
+    """Affiche les paramètres TTS actuels"""
+    
+    # Trouver le nom de la voix actuelle
+    current_voice = None
+    for name, voice_id in VOICES_PRESETS.items():
+        if voice_id == TTS_VOICE_ID:
+            current_voice = name
+            break
+    
+    speaker_boost_status = "✅ Activé" if TTS_USE_SPEAKER_BOOST else "❌ Désactivé"
+    
+    settings_text = f"""⚙️ **Paramètres TTS actuels:**
+
+🎙️ **Voix:** {current_voice if current_voice else TTS_VOICE_ID}
+🎚️ **Vitesse:** {TTS_SPEED}x
+🎯 **Stabilité:** {TTS_STABILITY}
+🎨 **Style:** {TTS_STYLE}
+🔊 **Speaker Boost:** {speaker_boost_status}
+
+**Modifier les paramètres:**
+`!speed [0.5-2.0]` - Changer la vitesse
+`!stability [0.0-1.0]` - Changer la stabilité
+`!style [0.0-1.0]` - Changer le style
+`!speaker-boost [on|off]` - Changer speaker boost
+`!voice [nom]` - Changer la voix
+"""
+    
+    await ctx.send(settings_text)
     """Affiche l'aide pour les commandes vocales"""
     help_text = """🎙️ **Commandes Vocales:**
 
+**Voix:**
 `!voice` - Affiche la voix actuelle et les voix disponibles
 `!voice [nom]` - Change la voix (default, bella, adam, arnold, george, callum)
 `!voice-custom [id]` - Change la voix avec un ID personnalisé d'ElevenLabs
-`!disconnect` - Déconnecte le bot du canal vocal
+
+**Paramètres TTS:**
+`!speed [valeur]` - Change la vitesse (0.5 à 2.0, défaut: 1.0)
+`!stability [valeur]` - Change la stabilité (0.0 à 1.0, défaut: 0.5)
+`!style [valeur]` - Change le style (0.0 à 1.0, défaut: 0.0)
+`!speaker-boost [on|off]` - Active/désactive le speaker boost
+
+**Commandes Principales:**
 `!chaos` - Génère un texte absurde et le lit à voix haute
 `!prompt` - Affiche le dernier prompt envoyé à Gemini
+`!disconnect` - Déconnecte le bot du canal vocal
 
 **Exemples:**
-`!voice bella` - Change la voix à Bella
-`!voice-custom pNInz6obpgDQGcFmaJgB` - Utilise un voice ID personnalisé
-
-**Note:** La vitesse de lecture n'est pas encore supportée par l'API ElevenLabs.
-Tu peux changer de voix pour obtenir des vitesses différentes.
+```
+!voice bella              # Change la voix à Bella
+!speed 1.5               # Augmente la vitesse à 1.5x
+!stability 0.7           # Rend la voix plus stable
+!style 0.5               # Ajoute du style à la voix
+!speaker-boost on        # Active le speaker boost
+!voice-custom pNInz6obpgDQGcFmaJgB  # Utilise un voice ID personnalisé
+```
 """
     await ctx.send(help_text)
 
