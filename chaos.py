@@ -4,6 +4,7 @@ import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 from collections import deque
+import asyncio
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -18,6 +19,8 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Créer le bot
 intents = discord.Intents.default()
 intents.message_content = True
+intents.voice_states = True  # Ajouter les voice_states
+intents.guilds = True  # Ajouter les guilds
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Historique des 10 dernières phrases générées
@@ -50,13 +53,78 @@ def build_chaos_prompt():
     
     return BASE_CHAOS_PROMPT.format(history=history_text)
 
+async def play_audio(ctx, audio_file="kaamelott.mp3"):
+    """Connecte le bot au canal vocal et joue un son"""
+    voice_client = None
+    
+    try:
+        # Vérifier que l'utilisateur est dans un canal vocal
+        if ctx.author.voice is None or ctx.author.voice.channel is None:
+            await ctx.send("❌ Tu dois être dans un canal vocal pour que je joue le son!")
+            return
+        
+        # Vérifier que le fichier audio existe
+        if not os.path.exists(audio_file):
+            await ctx.send(f"❌ Le fichier `{audio_file}` n'a pas été trouvé!")
+            return
+        
+        voice_channel = ctx.author.voice.channel
+        
+        # Nettoyer les anciennes connexions
+        for vc in bot.voice_clients:
+            if vc.guild == ctx.guild:
+                await vc.disconnect(force=True)
+        
+        await asyncio.sleep(1)
+        
+        # Se connecter
+        print(f"[AUDIO] Tentative de connexion à {voice_channel.name}...")
+        voice_client = await voice_channel.connect(timeout=60, reconnect=False)
+        print(f"[AUDIO] ✅ Connecté")
+        
+        await asyncio.sleep(0.2)
+        
+        # Jouer le son
+        print(f"[AUDIO] Lecture de {audio_file}...")
+        audio_source = discord.FFmpegPCMAudio(audio_file)
+        voice_client.play(audio_source)
+        
+        # Attendre la fin
+        while voice_client.is_playing():
+            await asyncio.sleep(0.1)
+        
+        print(f"[AUDIO] ✅ Lecture terminée")
+        await asyncio.sleep(0.5)
+        
+    except asyncio.TimeoutError:
+        await ctx.send("❌ Timeout de connexion. Réessayez dans quelques secondes.")
+        print("[AUDIO] ❌ Timeout")
+    except discord.errors.ClientException as e:
+        await ctx.send(f"❌ Erreur de client Discord: {str(e)}")
+        print(f"[AUDIO] ❌ ClientException: {e}")
+    except FileNotFoundError as e:
+        await ctx.send("❌ FFmpeg n'est pas installé ou le fichier n'existe pas")
+        print(f"[AUDIO] ❌ FileNotFoundError: {e}")
+    except Exception as e:
+        await ctx.send(f"❌ Erreur: {str(e)}")
+        print(f"[AUDIO] ❌ Exception: {type(e).__name__}: {e}")
+    finally:
+        # Toujours déconnecter à la fin
+        if voice_client is not None and voice_client.is_connected():
+            try:
+                print("[AUDIO] Déconnexion...")
+                await voice_client.disconnect(force=True)
+                print("[AUDIO] ✅ Déconnecté")
+            except Exception as e:
+                print(f"[AUDIO] Erreur déconnexion: {e}")
+
 @bot.event
 async def on_ready():
     print(f'{bot.user} s\'est connecté à Discord!')
 
 @bot.command(name='chaos')
 async def chaos(ctx):
-    """Génère un texte aléatoire avec Gemini"""
+    """Génère un texte aléatoire avec Gemini et joue un son"""
     global last_prompt
     try:
         # Afficher que le bot est en train de traiter
@@ -85,6 +153,9 @@ async def chaos(ctx):
             
             # Envoyer le message
             await ctx.send(generated_text)
+        
+        # Jouer le son après avoir envoyé le texte
+        await play_audio(ctx, "kaamelott.mp3")
             
     except Exception as e:
         await ctx.send(f"Erreur lors de la génération du texte: {str(e)}")
