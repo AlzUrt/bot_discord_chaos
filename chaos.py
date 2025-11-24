@@ -5,6 +5,8 @@ import os
 from dotenv import load_dotenv
 from collections import deque
 import asyncio
+from gtts import gTTS
+import tempfile
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -21,8 +23,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 intents.guilds = True
-intents.members = True  # Important pour les informations des membres
-intents.presences = True  # Important pour le statut des utilisateurs
+intents.members = True
+intents.presences = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Historique des 10 dernières phrases générées
@@ -57,202 +59,108 @@ def build_chaos_prompt():
 
 async def play_audio(ctx, audio_file="kaamelott.mp3"):
     """Connecte le bot au canal vocal et joue un son"""
-    import traceback
-    import subprocess
-    
-    print("\n" + "="*60)
-    print("[AUDIO] 🔍 DÉMARRAGE DEBUG COMPLET")
-    print("="*60)
-    
     voice_client = None
     
     try:
-        # ===== ÉTAPE 1 : VÉRIFICATIONS PRÉALABLES =====
-        print("\n[AUDIO] 📋 ÉTAPE 1: Vérifications préalables")
-        print("-" * 60)
-        
-        # Vérifier FFmpeg
-        try:
-            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5)
-            ffmpeg_version = result.stdout.decode().split('\n')[0]
-            print(f"[AUDIO] ✅ FFmpeg trouvé: {ffmpeg_version}")
-        except Exception as e:
-            print(f"[AUDIO] ❌ FFmpeg non trouvé: {e}")
-            print(f"[AUDIO] ⚠️  Installez FFmpeg et ajoutez-le au PATH")
+        if ctx.author.voice is None or ctx.author.voice.channel is None:
             return
         
-        # Vérifier que l'utilisateur est dans un canal vocal
-        print(f"[AUDIO] Vérification canal vocal utilisateur...")
-        print(f"  - ctx.author.voice: {ctx.author.voice}")
-        
-        if ctx.author.voice is None:
-            print(f"[AUDIO] ❌ ctx.author.voice est None")
-            return
-        
-        print(f"  - ctx.author.voice.channel: {ctx.author.voice.channel}")
-        
-        if ctx.author.voice.channel is None:
-            print(f"[AUDIO] ❌ L'utilisateur n'est pas dans un canal vocal")
+        if not os.path.exists(audio_file):
             return
         
         voice_channel = ctx.author.voice.channel
-        print(f"[AUDIO] ✅ Canal vocal trouvé: {voice_channel.name} (ID: {voice_channel.id})")
-        print(f"  - Type de canal: {type(voice_channel)}")
-        print(f"  - Guild: {ctx.guild.name} (ID: {ctx.guild.id})")
         
-        # Vérifier le fichier audio
-        print(f"\n[AUDIO] Vérification fichier audio...")
-        audio_path = os.path.abspath(audio_file)
-        print(f"  - Chemin fourni: {audio_file}")
-        print(f"  - Chemin absolu: {audio_path}")
-        print(f"  - Fichier existe: {os.path.exists(audio_path)}")
-        print(f"  - Taille: {os.path.getsize(audio_path) if os.path.exists(audio_path) else 'N/A'} bytes")
-        
-        if not os.path.exists(audio_path):
-            print(f"[AUDIO] ❌ Le fichier n'existe pas!")
-            return
-        
-        # ===== ÉTAPE 2 : NETTOYAGE CONNEXIONS EXISTANTES =====
-        print(f"\n[AUDIO] 📋 ÉTAPE 2: Nettoyage des connexions existantes")
-        print("-" * 60)
-        print(f"[AUDIO] Nombre de voice_clients actuels: {len(bot.voice_clients)}")
-        
-        for i, vc in enumerate(bot.voice_clients):
-            print(f"  [{i}] Guild: {vc.guild.name}, Connecté: {vc.is_connected()}")
+        # Nettoyer les anciennes connexions
+        for vc in bot.voice_clients:
             if vc.guild == ctx.guild:
-                print(f"      → Déconnexion de {vc.guild.name}...")
                 try:
                     await vc.disconnect(force=True)
-                    print(f"      ✅ Déconnecté")
-                except Exception as e:
-                    print(f"      ❌ Erreur: {e}")
-        
-        await asyncio.sleep(1)
-        print(f"[AUDIO] Attente de 1s complétée")
-        
-        # ===== ÉTAPE 3 : CONNEXION AU CANAL VOCAL =====
-        print(f"\n[AUDIO] 📋 ÉTAPE 3: Connexion au canal vocal")
-        print("-" * 60)
-        print(f"[AUDIO] Tentative de connexion à '{voice_channel.name}'...")
-        
-        try:
-            # FIX: Ajouter self_deaf=True pour éviter IndexError sur les modes de chiffrement
-            voice_client = await voice_channel.connect(timeout=60, reconnect=False, self_deaf=True)
-            print(f"[AUDIO] ✅ Connecté au canal vocal")
-            print(f"  - voice_client type: {type(voice_client)}")
-            print(f"  - is_connected(): {voice_client.is_connected()}")
-            print(f"  - Guild: {voice_client.guild.name}")
-        except IndexError as e:
-            print(f"[AUDIO] ❌ IndexError lors de la connexion: {e}")
-            print(f"[AUDIO] ℹ️  Ceci est un bug connu de discord.py avec les modes de chiffrement")
-            print(f"[AUDIO] 💡 Solutions possibles:")
-            print(f"     1. Mettez à jour discord.py: pip install --upgrade discord.py")
-            print(f"     2. Ou installez discord.py[voice]: pip install discord.py[voice]")
-            print(f"     3. Redémarrez le bot après mise à jour")
-            traceback.print_exc()
-            return
-        except asyncio.TimeoutError as e:
-            print(f"[AUDIO] ❌ Timeout lors de la connexion: {e}")
-            traceback.print_exc()
-            return
-        except discord.errors.ClientException as e:
-            print(f"[AUDIO] ❌ Erreur Discord: {e}")
-            print(f"  - Type: {type(e)}")
-            traceback.print_exc()
-            return
-        except Exception as e:
-            print(f"[AUDIO] ❌ Erreur inattendue: {type(e).__name__}: {e}")
-            traceback.print_exc()
-            return
+                except:
+                    pass
         
         await asyncio.sleep(0.5)
         
-        # ===== ÉTAPE 4 : CRÉATION DE L'AUDIO SOURCE =====
-        print(f"\n[AUDIO] 📋 ÉTAPE 4: Création de l'audio source")
-        print("-" * 60)
+        # Se connecter
+        voice_client = await voice_channel.connect(timeout=60, reconnect=False, self_deaf=True)
+        await asyncio.sleep(0.2)
         
-        try:
-            print(f"[AUDIO] Création de FFmpegPCMAudio...")
-            print(f"  - Fichier: {audio_path}")
-            print(f"  - Executable: ffmpeg")
-            
-            audio_source = discord.FFmpegPCMAudio(audio_path)
-            print(f"[AUDIO] ✅ Audio source créée")
-            print(f"  - Type: {type(audio_source)}")
-            
-        except IndexError as e:
-            print(f"[AUDIO] ❌ IndexError lors de la création: {e}")
-            print(f"  - FFmpeg peut ne pas être trouvé ou accessible")
-            print(f"  - Vérifiez que FFmpeg est dans le PATH")
-            traceback.print_exc()
-            return
-        except FileNotFoundError as e:
-            print(f"[AUDIO] ❌ Fichier non trouvé: {e}")
-            traceback.print_exc()
-            return
-        except Exception as e:
-            print(f"[AUDIO] ❌ Erreur: {type(e).__name__}: {e}")
-            traceback.print_exc()
-            return
+        # Jouer le son
+        audio_source = discord.FFmpegPCMAudio(audio_file)
+        voice_client.play(audio_source)
         
-        # ===== ÉTAPE 5 : LECTURE DU SON =====
-        print(f"\n[AUDIO] 📋 ÉTAPE 5: Lecture du son")
-        print("-" * 60)
+        # Attendre la fin
+        while voice_client.is_playing():
+            await asyncio.sleep(0.1)
         
-        try:
-            print(f"[AUDIO] Démarrage de la lecture...")
-            voice_client.play(audio_source)
-            print(f"[AUDIO] ✅ Lecture démarrée")
-            
-            # Attendre la fin avec timeout
-            max_wait = 60
-            elapsed = 0
-            check_interval = 0.5
-            
-            print(f"[AUDIO] Attente de la fin de la lecture (max {max_wait}s)...")
-            while voice_client.is_playing() and elapsed < max_wait:
-                await asyncio.sleep(check_interval)
-                elapsed += check_interval
-                if elapsed % 5 < check_interval:  # Print tous les ~5s
-                    print(f"[AUDIO] En cours... ({elapsed:.1f}s)")
-            
-            if elapsed >= max_wait:
-                print(f"[AUDIO] ⚠️  Timeout atteint ({max_wait}s)")
-            else:
-                print(f"[AUDIO] ✅ Lecture terminée ({elapsed:.1f}s)")
-            
-            await asyncio.sleep(0.5)
-            
-        except Exception as e:
-            print(f"[AUDIO] ❌ Erreur lors de la lecture: {type(e).__name__}: {e}")
-            traceback.print_exc()
+        await asyncio.sleep(0.5)
         
     except Exception as e:
-        print(f"[AUDIO] ❌ Exception générale non gérée: {type(e).__name__}: {e}")
-        traceback.print_exc()
-        
+        print(f"Erreur audio: {e}")
     finally:
-        # ===== ÉTAPE 6 : NETTOYAGE =====
-        print(f"\n[AUDIO] 📋 ÉTAPE 6: Nettoyage et déconnexion")
-        print("-" * 60)
+        if voice_client is not None and voice_client.is_connected():
+            try:
+                await voice_client.disconnect(force=True)
+            except:
+                pass
+
+async def play_tts(ctx, text):
+    """Génère et joue un fichier TTS en français"""
+    voice_client = None
+    temp_file = None
+    
+    try:
+        if ctx.author.voice is None or ctx.author.voice.channel is None:
+            return
         
-        if voice_client is not None:
-            print(f"[AUDIO] voice_client existe")
-            print(f"  - is_connected(): {voice_client.is_connected()}")
-            
-            if voice_client.is_connected():
+        voice_channel = ctx.author.voice.channel
+        
+        # Nettoyer les anciennes connexions
+        for vc in bot.voice_clients:
+            if vc.guild == ctx.guild:
                 try:
-                    print(f"[AUDIO] Déconnexion...")
-                    await voice_client.disconnect(force=True)
-                    print(f"[AUDIO] ✅ Déconnecté")
-                except Exception as e:
-                    print(f"[AUDIO] ❌ Erreur déconnexion: {type(e).__name__}: {e}")
-        else:
-            print(f"[AUDIO] voice_client est None")
+                    await vc.disconnect(force=True)
+                except:
+                    pass
         
-        print("\n" + "="*60)
-        print("[AUDIO] 🔍 FIN DEBUG")
-        print("="*60 + "\n")
+        await asyncio.sleep(0.5)
+        
+        # Se connecter
+        voice_client = await voice_channel.connect(timeout=60, reconnect=False, self_deaf=True)
+        await asyncio.sleep(0.2)
+        
+        # Générer le TTS
+        tts = gTTS(text, lang='fr', slow=False)
+        
+        # Créer un fichier temporaire
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
+            temp_file = tmp.name
+            tts.save(temp_file)
+        
+        # Jouer le son
+        audio_source = discord.FFmpegPCMAudio(temp_file)
+        voice_client.play(audio_source)
+        
+        # Attendre la fin
+        while voice_client.is_playing():
+            await asyncio.sleep(0.1)
+        
+        await asyncio.sleep(0.5)
+        
+    except Exception as e:
+        print(f"Erreur TTS: {e}")
+    finally:
+        if voice_client is not None and voice_client.is_connected():
+            try:
+                await voice_client.disconnect(force=True)
+            except:
+                pass
+        
+        # Nettoyer le fichier temporaire
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
 
 @bot.event
 async def on_ready():
@@ -260,10 +168,9 @@ async def on_ready():
 
 @bot.command(name='chaos')
 async def chaos(ctx):
-    """Génère un texte aléatoire avec Gemini et joue un son"""
+    """Génère un texte aléatoire avec Gemini, joue un son, puis lit le texte à voix haute"""
     global last_prompt
     try:
-        # Afficher que le bot est en train de traiter
         async with ctx.typing():
             # Construire le prompt avec l'historique
             current_prompt = build_chaos_prompt()
@@ -295,12 +202,15 @@ async def chaos(ctx):
             # Envoyer le message
             await ctx.send(generated_text)
         
-        # Jouer le son après avoir envoyé le texte
+        # Jouer le son Kaamelott
         await play_audio(ctx, "kaamelott.mp3")
+        
+        # Lire le texte à voix haute
+        await play_tts(ctx, generated_text)
             
     except Exception as e:
-        print(f"[ERROR] Exception complète: {type(e).__name__}: {e}")
-        await ctx.send(f"❌ Erreur lors de la génération du texte: {str(e)}")
+        print(f"Erreur: {type(e).__name__}: {e}")
+        await ctx.send(f"❌ Erreur: {str(e)}")
 
 
 @bot.command(name='prompt')
@@ -311,17 +221,12 @@ async def prompt(ctx):
     if last_prompt is None:
         await ctx.send("❌ Aucun prompt n'a été généré pour le moment. Utilise `!chaos` d'abord.")
     else:
-        # Discord a une limite de 2000 caractères par message
         max_length = 1900
         
         if len(last_prompt) <= max_length:
-            # Si c'est court, on envoie directement
             await ctx.send(f"🔮 **Dernier prompt envoyé:**\n```\n{last_prompt}\n```")
         else:
-            # Si c'est trop long, on découpe en plusieurs messages
             await ctx.send("🔮 **Dernier prompt envoyé:** (en plusieurs parties)")
-            
-            # Découper le prompt en chunks
             chunks = [last_prompt[i:i + max_length] for i in range(0, len(last_prompt), max_length)]
             
             for i, chunk in enumerate(chunks, 1):
