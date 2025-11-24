@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 from collections import deque
 import asyncio
-from gtts import gTTS
+import pyttsx3
 import tempfile
 
 # Charger les variables d'environnement
@@ -32,6 +32,12 @@ generated_history = deque(maxlen=10)
 
 # Variable pour stocker le dernier prompt envoyé
 last_prompt = None
+
+# ===== CONFIGURATION TTS =====
+# Voix disponibles: 0 = Voix par défaut, 1 = Voix alternative (si disponible)
+TTS_VOICE = 0  # Changez à 1 pour une autre voix si disponible
+TTS_SPEED = 150  # Vitesse en mots par minute (50-300, défaut ~200)
+TTS_VOLUME = 1.0  # Volume (0.0-1.0)
 
 # Prompt de base pour !chaos
 BASE_CHAOS_PROMPT = """Génère un paragraphe de 3 à 4 phrases, sous forme d'histoire absurde qui enchaîne des ordres étranges. Le texte doit être dérangeant, choquant, absurde, mais chaque action doit avoir une justification interne, comme si tout obéissait à une logique bizarre mais cohérente dans cet univers.
@@ -104,7 +110,7 @@ async def play_audio(ctx, audio_file="kaamelott.mp3"):
                 pass
 
 async def play_tts(ctx, text):
-    """Génère et joue un fichier TTS en français"""
+    """Génère et joue un fichier TTS avec pyttsx3"""
     voice_client = None
     temp_file = None
     
@@ -128,13 +134,24 @@ async def play_tts(ctx, text):
         voice_client = await voice_channel.connect(timeout=60, reconnect=False, self_deaf=True)
         await asyncio.sleep(0.2)
         
-        # Générer le TTS
-        tts = gTTS(text, lang='fr', slow=False)
+        # Générer le TTS avec pyttsx3
+        engine = pyttsx3.init()
+        
+        # Configurer les paramètres TTS
+        voices = engine.getProperty('voices')
+        if TTS_VOICE < len(voices):
+            engine.setProperty('voice', voices[TTS_VOICE].id)
+        
+        engine.setProperty('rate', TTS_SPEED)  # Vitesse
+        engine.setProperty('volume', TTS_VOLUME)  # Volume
         
         # Créer un fichier temporaire
-        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
             temp_file = tmp.name
-            tts.save(temp_file)
+        
+        # Sauvegarder l'audio dans le fichier temporaire
+        engine.save_to_file(text, temp_file)
+        engine.runAndWait()
         
         # Jouer le son
         audio_source = discord.FFmpegPCMAudio(temp_file)
@@ -233,6 +250,95 @@ async def prompt(ctx):
                 await ctx.send(f"```\n{chunk}\n```")
                 
             await ctx.send(f"✅ Prompt affiché en {len(chunks)} partie(s)")
+
+
+@bot.command(name='voices')
+async def voices(ctx):
+    """Affiche les voix disponibles"""
+    try:
+        engine = pyttsx3.init()
+        available_voices = engine.getProperty('voices')
+        
+        response = "🎤 **Voix disponibles:**\n"
+        for i, voice in enumerate(available_voices):
+            response += f"**{i}** - {voice.name}\n"
+        
+        response += f"\nVoix actuelle: **{TTS_VOICE}**\n"
+        response += f"Vitesse: **{TTS_SPEED}** mots/min\n"
+        response += f"Volume: **{TTS_VOLUME}**\n\n"
+        response += "Utilisez `!setvoice <numéro>` pour changer"
+        
+        await ctx.send(response)
+    except Exception as e:
+        await ctx.send(f"❌ Erreur: {e}")
+
+
+@bot.command(name='setvoice')
+async def setvoice(ctx, voice_id: int):
+    """Change la voix TTS (utilise !voices pour voir les options)"""
+    global TTS_VOICE
+    
+    try:
+        engine = pyttsx3.init()
+        available_voices = engine.getProperty('voices')
+        
+        if 0 <= voice_id < len(available_voices):
+            TTS_VOICE = voice_id
+            voice_name = available_voices[voice_id].name
+            await ctx.send(f"✅ Voix changée à: **{voice_name}**")
+        else:
+            await ctx.send(f"❌ Voix invalide. Utilisez `!voices` pour voir les options.")
+    except Exception as e:
+        await ctx.send(f"❌ Erreur: {e}")
+
+
+@bot.command(name='setspeed')
+async def setspeed(ctx, speed: int):
+    """Change la vitesse de lecture TTS (50-300 mots/min, défaut 150)"""
+    global TTS_SPEED
+    
+    if 50 <= speed <= 300:
+        TTS_SPEED = speed
+        await ctx.send(f"✅ Vitesse changée à: **{speed}** mots/min")
+    else:
+        await ctx.send(f"❌ La vitesse doit être entre 50 et 300 (défaut: 150)")
+
+
+@bot.command(name='setvolume')
+async def setvolume(ctx, volume: float):
+    """Change le volume TTS (0.0-1.0)"""
+    global TTS_VOLUME
+    
+    if 0.0 <= volume <= 1.0:
+        TTS_VOLUME = volume
+        await ctx.send(f"✅ Volume changé à: **{volume}**")
+    else:
+        await ctx.send(f"❌ Le volume doit être entre 0.0 et 1.0")
+
+
+@bot.command(name='ttsstatus')
+async def ttsstatus(ctx):
+    """Affiche les paramètres TTS actuels"""
+    try:
+        engine = pyttsx3.init()
+        voices = engine.getProperty('voices')
+        current_voice = voices[TTS_VOICE].name if TTS_VOICE < len(voices) else "Inconnue"
+        
+        response = f"""
+🎤 **Paramètres TTS actuels:**
+• Voix: **{current_voice}** (ID: {TTS_VOICE})
+• Vitesse: **{TTS_SPEED}** mots/min
+• Volume: **{TTS_VOLUME}**
+
+📝 **Commandes disponibles:**
+`!voices` - Voir les voix disponibles
+`!setvoice <id>` - Changer la voix
+`!setspeed <50-300>` - Changer la vitesse
+`!setvolume <0.0-1.0>` - Changer le volume
+"""
+        await ctx.send(response)
+    except Exception as e:
+        await ctx.send(f"❌ Erreur: {e}")
 
 
 # Lancer le bot
