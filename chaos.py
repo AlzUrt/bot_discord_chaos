@@ -40,9 +40,16 @@ last_prompt = None
 # ===== CONFIGURATION TTS =====
 # Voix disponibles: https://elevenlabs.io/docs/voices
 TTS_VOICE_ID = "4TfTGcPwoefWe878B0rm"  # Voice ID de la voix sélectionnée
-TTS_STABILITY = 0.5  # 0.0-1.0 (plus bas = plus de variation)
-TTS_SIMILARITY = 0.75  # 0.0-1.0 (plus haut = plus proche de la voix)
-TTS_SPEED = 1.0  # Vitesse de lecture (0.5-2.0)
+
+# Dictionnaire des voix prédéfinies (exemple)
+VOICES_PRESETS = {
+    "default": "4TfTGcPwoefWe878B0rm",
+    "bella": "EXAVITQu4vr4xnSDxMaL",
+    "adam": "pNInz6obpgDQGcFmaJgB",
+    "arnold": "jBpfuIE2acIp3nSgFhAH",
+    "george": "JBFqnCBsd6RMkjW3MqDE",
+    "callum": "N2lVS1w4EtoT3dr4eOWO",
+}
 
 # Prompt de base pour !chaos
 BASE_CHAOS_PROMPT = """Génère un paragraphe de 3 à 4 phrases, sous forme d'histoire absurde qui enchaîne des ordres étranges. Le texte doit être dérangeant, choquant, absurde, mais chaque action doit avoir une justification interne, comme si tout obéissait à une logique bizarre mais cohérente dans cet univers.
@@ -68,34 +75,45 @@ def build_chaos_prompt():
     
     return BASE_CHAOS_PROMPT.format(history=history_text)
 
-async def play_audio(ctx, audio_file="kaamelott.mp3"):
-    """Connecte le bot au canal vocal et joue un son"""
-    voice_client = None
+async def ensure_voice_connection(ctx):
+    """S'assure que le bot est connecté au canal vocal de l'utilisateur.
+    Retourne le voice client ou None."""
+    
+    if ctx.author.voice is None or ctx.author.voice.channel is None:
+        await ctx.send("❌ Tu dois être dans un canal vocal !")
+        return None
+    
+    voice_channel = ctx.author.voice.channel
+    
+    # Vérifier s'il y a une connexion existante
+    voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+    
+    if voice_client and voice_client.is_connected():
+        # Si on est dans le bon canal, garder la connexion
+        if voice_client.channel == voice_channel:
+            return voice_client
+        # Sinon, se déplacer vers le nouveau canal
+        else:
+            await voice_client.move_to(voice_channel)
+            return voice_client
+    
+    # Se connecter pour la première fois
+    try:
+        voice_client = await voice_channel.connect(timeout=60, reconnect=True, self_deaf=True)
+        return voice_client
+    except Exception as e:
+        print(f"Erreur connexion vocale: {e}")
+        await ctx.send(f"❌ Erreur de connexion vocale: {e}")
+        return None
+
+async def play_audio_file(voice_client, audio_file="kaamelott.mp3"):
+    """Joue un fichier audio sans déconnecter"""
+    
+    if not os.path.exists(audio_file):
+        print(f"Fichier non trouvé: {audio_file}")
+        return False
     
     try:
-        if ctx.author.voice is None or ctx.author.voice.channel is None:
-            return
-        
-        if not os.path.exists(audio_file):
-            return
-        
-        voice_channel = ctx.author.voice.channel
-        
-        # Nettoyer les anciennes connexions
-        for vc in bot.voice_clients:
-            if vc.guild == ctx.guild:
-                try:
-                    await vc.disconnect(force=True)
-                except:
-                    pass
-        
-        await asyncio.sleep(0.5)
-        
-        # Se connecter
-        voice_client = await voice_channel.connect(timeout=60, reconnect=False, self_deaf=True)
-        await asyncio.sleep(0.2)
-        
-        # Jouer le son
         audio_source = discord.FFmpegPCMAudio(audio_file)
         voice_client.play(audio_source)
         
@@ -103,42 +121,18 @@ async def play_audio(ctx, audio_file="kaamelott.mp3"):
         while voice_client.is_playing():
             await asyncio.sleep(0.1)
         
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
+        return True
         
     except Exception as e:
-        print(f"Erreur audio: {e}")
-    finally:
-        if voice_client is not None and voice_client.is_connected():
-            try:
-                await voice_client.disconnect(force=True)
-            except:
-                pass
+        print(f"Erreur lecture audio: {e}")
+        return False
 
-async def play_tts(ctx, text):
-    """Génère et joue un fichier TTS avec ElevenLabs"""
-    voice_client = None
+async def play_tts(voice_client, text):
+    """Génère et joue un fichier TTS avec ElevenLabs sans déconnecter"""
     temp_file = None
     
     try:
-        if ctx.author.voice is None or ctx.author.voice.channel is None:
-            return
-        
-        voice_channel = ctx.author.voice.channel
-        
-        # Nettoyer les anciennes connexions
-        for vc in bot.voice_clients:
-            if vc.guild == ctx.guild:
-                try:
-                    await vc.disconnect(force=True)
-                except:
-                    pass
-        
-        await asyncio.sleep(0.5)
-        
-        # Se connecter
-        voice_client = await voice_channel.connect(timeout=60, reconnect=False, self_deaf=True)
-        await asyncio.sleep(0.2)
-        
         # Générer le TTS avec ElevenLabs
         print(f"Génération TTS avec ElevenLabs...")
         audio = client.text_to_speech.convert(
@@ -164,17 +158,13 @@ async def play_tts(ctx, text):
         while voice_client.is_playing():
             await asyncio.sleep(0.1)
         
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
+        return True
         
     except Exception as e:
         print(f"Erreur TTS: {e}")
+        return False
     finally:
-        if voice_client is not None and voice_client.is_connected():
-            try:
-                await voice_client.disconnect(force=True)
-            except:
-                pass
-        
         # Nettoyer le fichier temporaire
         if temp_file and os.path.exists(temp_file):
             try:
@@ -190,6 +180,11 @@ async def on_ready():
 async def chaos(ctx):
     """Génère un texte aléatoire avec Gemini, joue un son, puis lit le texte à voix haute"""
     global last_prompt
+    
+    voice_client = await ensure_voice_connection(ctx)
+    if not voice_client:
+        return
+    
     try:
         async with ctx.typing():
             # Construire le prompt avec l'historique
@@ -222,16 +217,78 @@ async def chaos(ctx):
             # Envoyer le message
             await ctx.send(generated_text)
         
-        # Jouer le son Kaamelott
-        await play_audio(ctx, "kaamelott.mp3")
+        # Jouer le son Kaamelott SANS déconnecter
+        await play_audio_file(voice_client, "kaamelott.mp3")
         
-        # Lire le texte à voix haute
-        await play_tts(ctx, generated_text)
+        # Lire le texte à voix haute SANS déconnecter
+        await play_tts(voice_client, generated_text)
+        
+        # Maintenant on peut déconnecter si on veut (optionnel)
+        # await voice_client.disconnect()
             
     except Exception as e:
         print(f"Erreur: {type(e).__name__}: {e}")
         await ctx.send(f"❌ Erreur: {str(e)}")
 
+@bot.command(name='disconnect')
+async def disconnect(ctx):
+    """Déconnecte le bot du canal vocal"""
+    voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+    
+    if voice_client and voice_client.is_connected():
+        await voice_client.disconnect()
+        await ctx.send("✅ Déconnecté du canal vocal")
+    else:
+        await ctx.send("❌ Le bot n'est pas connecté à un canal vocal")
+
+@bot.command(name='voice')
+async def voice(ctx, voice_name: str = None):
+    """Change la voix TTS
+    
+    Utilisation: !voice [nom_voix]
+    Voix disponibles: default, bella, adam, arnold, george, callum
+    
+    Exemple: !voice bella
+    """
+    global TTS_VOICE_ID
+    
+    if voice_name is None:
+        # Afficher la voix actuelle et les options disponibles
+        current_voice = None
+        for name, voice_id in VOICES_PRESETS.items():
+            if voice_id == TTS_VOICE_ID:
+                current_voice = name
+                break
+        
+        voice_list = ", ".join(VOICES_PRESETS.keys())
+        await ctx.send(f"🎙️ **Voix actuelle:** {current_voice if current_voice else TTS_VOICE_ID}\n\n**Voix disponibles:** {voice_list}\n\nUtilise `!voice [nom]` pour changer")
+        return
+    
+    voice_name = voice_name.lower()
+    
+    if voice_name in VOICES_PRESETS:
+        TTS_VOICE_ID = VOICES_PRESETS[voice_name]
+        await ctx.send(f"✅ Voix changée à: **{voice_name}**")
+    else:
+        voice_list = ", ".join(VOICES_PRESETS.keys())
+        await ctx.send(f"❌ Voix inconnue: `{voice_name}`\n\n**Voix disponibles:** {voice_list}")
+
+@bot.command(name='voice-custom')
+async def voice_custom(ctx, voice_id: str):
+    """Change la voix TTS avec un ID personnalisé
+    
+    Utilisation: !voice-custom [voice_id]
+    
+    Exemple: !voice-custom pNInz6obpgDQGcFmaJgB
+    """
+    global TTS_VOICE_ID
+    
+    if not voice_id or len(voice_id) < 10:
+        await ctx.send("❌ ID de voix invalide. Utilise un ID valide d'ElevenLabs")
+        return
+    
+    TTS_VOICE_ID = voice_id
+    await ctx.send(f"✅ Voix TTS définie à l'ID: `{voice_id}`")
 
 @bot.command(name='prompt')
 async def prompt(ctx):
@@ -244,9 +301,9 @@ async def prompt(ctx):
         max_length = 1900
         
         if len(last_prompt) <= max_length:
-            await ctx.send(f"🔮 **Dernier prompt envoyé:**\n```\n{last_prompt}\n```")
+            await ctx.send(f"📮 **Dernier prompt envoyé:**\n```\n{last_prompt}\n```")
         else:
-            await ctx.send("🔮 **Dernier prompt envoyé:** (en plusieurs parties)")
+            await ctx.send("📮 **Dernier prompt envoyé:** (en plusieurs parties)")
             chunks = [last_prompt[i:i + max_length] for i in range(0, len(last_prompt), max_length)]
             
             for i, chunk in enumerate(chunks, 1):
@@ -254,6 +311,23 @@ async def prompt(ctx):
                 
             await ctx.send(f"✅ Prompt affiché en {len(chunks)} partie(s)")
 
+@bot.command(name='help-voice')
+async def help_voice(ctx):
+    """Affiche l'aide pour les commandes vocales"""
+    help_text = """🎙️ **Commandes Vocales:**
+
+`!voice` - Affiche la voix actuelle et les voix disponibles
+`!voice [nom]` - Change la voix (default, bella, adam, arnold, george, callum)
+`!voice-custom [id]` - Change la voix avec un ID personnalisé d'ElevenLabs
+`!disconnect` - Déconnecte le bot du canal vocal
+`!chaos` - Génère un texte absurde et le lit à voix haute
+`!prompt` - Affiche le dernier prompt envoyé à Gemini
+
+**Exemple:**
+`!voice bella` - Change la voix à Bella
+`!voice-custom pNInz6obpgDQGcFmaJgB` - Utilise un voice ID personnalisé
+"""
+    await ctx.send(help_text)
 
 # Lancer le bot
 bot.run(DISCORD_TOKEN)
