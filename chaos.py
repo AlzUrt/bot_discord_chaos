@@ -42,6 +42,7 @@ last_prompt = None
 # Voix disponibles: https://elevenlabs.io/docs/voices
 TTS_VOICE_ID = "4TfTGcPwoefWe878B0rm"  # Voice ID de la voix sélectionnée
 TTS_SPEED = 1.0  # Vitesse de lecture (0.5 à 2.0, défaut 1.0)
+TTS_SIMILARITY_BOOST = 0.75  # Similarity Boost (0.0 à 1.0, défaut 0.75)
 TTS_STABILITY = 0.5  # Stabilité (0.0 à 1.0, défaut 0.5)
 TTS_STYLE = 0.0  # Style (0.0 à 1.0, défaut 0.0)
 TTS_USE_SPEAKER_BOOST = True  # Utiliser speaker boost
@@ -152,7 +153,7 @@ async def play_tts(voice_client, text):
             output_format="mp3_44100_128",
             voice_settings=VoiceSettings(
                 stability=TTS_STABILITY,
-                similarity_boost=0.75,
+                similarity_boost=TTS_SIMILARITY_BOOST,
                 style=TTS_STYLE,
                 use_speaker_boost=TTS_USE_SPEAKER_BOOST,
                 speed=TTS_SPEED,
@@ -404,6 +405,30 @@ async def voice_custom(ctx, voice_id: str):
     TTS_VOICE_ID = voice_id
     await ctx.send(f"✅ Voix TTS définie à l'ID: `{voice_id}`")
 
+@bot.command(name='similarity-boost')
+async def similarity_boost(ctx, new_similarity_boost: float = None):
+    """Change la valeur de Similarity Boost de la voix TTS
+    
+    Utilisation: !similarity-boost [valeur]
+    Similarity Boost: 0.0 à 1.0 (défaut: 0.75)
+    - 0.0 = pas de boost
+    - 1.0 = boost maximal
+    
+    Exemple: !similarity-boost 0.8
+    """
+    global TTS_SIMILARITY_BOOST
+    
+    if new_similarity_boost is None:
+        await ctx.send(f"🎯 **Similarity Boost actuel:** {TTS_SIMILARITY_BOOST}\n\nUtilise `!similarity-boost [valeur]` pour changer\nValeurs: 0.0 à 1.0")
+        return
+    
+    if new_similarity_boost < 0.0 or new_similarity_boost > 1.0:
+        await ctx.send(f"❌ Similarity Boost invalide: `{new_similarity_boost}`\n\n**Plage autorisée:** 0.0 à 1.0")
+        return
+    
+    TTS_SIMILARITY_BOOST = new_similarity_boost
+    await ctx.send(f"✅ Similarity Boost défini à: **{TTS_SIMILARITY_BOOST}**")
+
 @bot.command(name='stability')
 async def stability(ctx, new_stability: float = None):
     """Change la stabilité de la voix TTS
@@ -503,7 +528,7 @@ async def prompt(ctx):
                 
             await ctx.send(f"✅ Prompt affiché en {len(chunks)} partie(s)")
 
-@bot.command(name='tts-settings')
+@bot.command(name='help-voice')
 async def tts_settings(ctx):
     """Affiche les paramètres TTS actuels"""
     
@@ -520,12 +545,14 @@ async def tts_settings(ctx):
 
 🎙️ **Voix:** {current_voice if current_voice else TTS_VOICE_ID}
 🎚️ **Vitesse:** {TTS_SPEED}x
+🎯 **Similarity Boost:** {TTS_SIMILARITY_BOOST}
 🎯 **Stabilité:** {TTS_STABILITY}
 🎨 **Style:** {TTS_STYLE}
 🔊 **Speaker Boost:** {speaker_boost_status}
 
 **Modifier les paramètres:**
 `!speed [0.5-2.0]` - Changer la vitesse
+`!similarity-boost [0.0-1.0]` - Changer le Similarity Boost
 `!stability [0.0-1.0]` - Changer la stabilité
 `!style [0.0-1.0]` - Changer le style
 `!speaker-boost [on|off]` - Changer speaker boost
@@ -559,6 +586,7 @@ async def tts_settings(ctx):
 !stability 0.7           # Rend la voix plus stable
 !style 0.5               # Ajoute du style à la voix
 !speaker-boost on        # Active le speaker boost
+!similarity-boost 0.8    # Change le Similarity Boost à 0.8
 !voice-custom pNInz6obpgDQGcFmaJgB  # Utilise un voice ID personnalisé
 ```
 """
