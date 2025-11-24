@@ -40,16 +40,16 @@ last_prompt = None
 
 # ===== CONFIGURATION TTS =====
 # Voix disponibles: https://elevenlabs.io/docs/voices
-TTS_VOICE_ID = "4TfTGcPwoefWe878B0rm"  # Voice ID de la voix sélectionnée
-TTS_SPEED = 1.0  # Vitesse de lecture (0.5 à 2.0, défaut 1.0)
-TTS_SIMILARITY_BOOST = 0.75  # Similarity Boost (0.0 à 1.0, défaut 0.75)
-TTS_STABILITY = 0.5  # Stabilité (0.0 à 1.0, défaut 0.5)
-TTS_STYLE = 0.0  # Style (0.0 à 1.0, défaut 0.0)
+TTS_VOICE_ID = "iMij959nvbX8f2SxyrvX"  # Voice ID de la voix sélectionnée
+TTS_SPEED = 1.2  # Vitesse de lecture (0.5 à 2.0, défaut 1.0)
+TTS_SIMILARITY_BOOST = 1.00  # Similarity Boost (0.0 à 1.0, défaut 0.75)
+TTS_STABILITY = 1.00  # Stabilité (0.0 à 1.0, défaut 0.5)
+TTS_STYLE = 0.5  # Style (0.0 à 1.0, défaut 0.0)
 TTS_USE_SPEAKER_BOOST = True  # Utiliser speaker boost
 
 # Dictionnaire des voix prédéfinies (exemple)
 VOICES_PRESETS = {
-    "default": "4TfTGcPwoefWe878B0rm",
+    "default": "iMij959nvbX8f2SxyrvX",
     "bella": "EXAVITQu4vr4xnSDxMaL",
     "adam": "pNInz6obpgDQGcFmaJgB",
     "arnold": "jBpfuIE2acIp3nSgFhAH",
