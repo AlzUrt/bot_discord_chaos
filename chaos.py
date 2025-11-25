@@ -245,24 +245,15 @@ async def chaos(ctx):
     print("🎮 Commande !chaos démarrée")
     print("="*50)
     
-    voice_client = await ensure_voice_connection(ctx)
-    if not voice_client:
-        print("❌ Impossible de se connecter au canal vocal")
-        return
-    
-    print(f"✅ Connecté au canal vocal: {voice_client.channel}")
-    
     tts_file = None  # Pour le nettoyage en cas d'erreur
+    voice_client = None
     
     try:
         async with ctx.typing():
-            # Construire le prompt avec l'historique
+            # 1. Construire le prompt et appeler Gemini
             current_prompt = build_chaos_prompt()
-            
-            # Enregistrer le dernier prompt
             last_prompt = current_prompt
             
-            # Appeler l'API Gemini
             print("📝 Appel à Gemini...")
             model = genai.GenerativeModel('gemini-2.0-flash')
             response = model.generate_content(
@@ -273,43 +264,50 @@ async def chaos(ctx):
                 )
             )
             
-            # Vérifier que la réponse est valide
             if not response or not response.text:
                 await ctx.send("⚠️ La réponse de Gemini était vide. Réessaye avec `!chaos`")
                 print("❌ Réponse Gemini vide")
                 return
             
-            # Extraire le texte généré
             generated_text = response.text.strip()
             print(f"✅ Texte généré: {generated_text[:100]}...")
             
             # Ajouter le texte à l'historique
             generated_history.append(generated_text)
             
-            # 🚀 Lancer la génération TTS en arrière-plan AVANT d'envoyer le message
+            # 2. 🚀 Lancer la génération TTS en arrière-plan
             print("🚀 Lancement de la génération TTS en arrière-plan...")
             tts_task = asyncio.create_task(generate_tts_file(generated_text))
             
-            # Envoyer le message dans le chat
-            await ctx.send(generated_text)
+            # 3. ⏳ Attendre que le TTS soit prêt
+            print("⏳ Attente de la fin de génération TTS...")
+            tts_file = await tts_task
+            
+            if not tts_file:
+                print("❌ La génération TTS a échoué")
+                await ctx.send("❌ Erreur lors de la génération TTS")
+                return
+            
+            print("✅ TTS prêt!")
         
-        # ⏳ Attendre que le TTS soit prêt
-        print("⏳ Attente de la fin de génération TTS...")
-        tts_file = await tts_task
-        
-        if not tts_file:
-            print("❌ La génération TTS a échoué")
-            await ctx.send("❌ Erreur lors de la génération TTS")
+        # 4. Connexion au vocal
+        voice_client = await ensure_voice_connection(ctx)
+        if not voice_client:
+            print("❌ Impossible de se connecter au canal vocal")
             return
         
-        print("✅ TTS prêt, lecture de Kaamelott...")
+        print(f"✅ Connecté au canal vocal: {voice_client.channel}")
         
-        # 🎵 Jouer le son Kaamelott (le TTS est déjà prêt!)
+        # 5. 🎵 Jouer le son Kaamelott
+        print("🎵 Lecture de Kaamelott...")
         kaamelott_ok = await play_audio_file(voice_client, "kaamelott.mp3")
         if kaamelott_ok:
             print("✅ Kaamelott joué")
         else:
             print("⚠️ Kaamelott n'a pas pu être joué")
+        
+        # 6. Envoyer le message dans le chat
+        await ctx.send(generated_text)
         
         # Vérifier la connexion avant TTS
         if not voice_client.is_connected():
@@ -317,7 +315,7 @@ async def chaos(ctx):
             await ctx.send("❌ Le bot s'est déconnecté")
             return
         
-        # 🔊 Lire le TTS immédiatement (fichier déjà prêt!)
+        # 7. 🔊 Lire le TTS immédiatement (fichier déjà prêt!)
         print("🔊 Lecture du TTS...")
         tts_ok = await play_tts_file(voice_client, tts_file)
         tts_file = None  # Le fichier est nettoyé par play_tts_file
@@ -328,7 +326,7 @@ async def chaos(ctx):
             print("❌ TTS n'a pas pu être joué")
             await ctx.send("❌ Erreur lors de la lecture TTS")
         
-        # Déconnecter automatiquement après avoir fini
+        # 8. Déconnecter automatiquement après avoir fini
         print("🔌 Déconnexion du canal vocal...")
         await voice_client.disconnect()
         print("✅ Déconnecté")
