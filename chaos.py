@@ -8,6 +8,8 @@ import asyncio
 from elevenlabs.client import ElevenLabs
 from elevenlabs import VoiceSettings
 import tempfile
+import subprocess
+import json
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -52,6 +54,32 @@ def get_current_key_info():
     """Retourne les infos sur la clé actuelle"""
     return f"Clé {current_elevenlabs_key_index + 1}/{len(ELEVENLABS_API_KEYS)}"
 
+
+def get_audio_duration(file_path):
+    """Obtient la durée exacte d'un fichier audio en secondes via ffprobe"""
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe',
+                '-v', 'quiet',
+                '-print_format', 'json',
+                '-show_format',
+                file_path
+            ],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            duration = float(data['format']['duration'])
+            print(f"📏 Durée audio: {duration:.2f}s")
+            return duration
+    except Exception as e:
+        print(f"⚠️ Impossible d'obtenir la durée exacte: {e}")
+    
+    return None
+
 # Créer le bot
 intents = discord.Intents.default()
 intents.message_content = True
@@ -69,7 +97,7 @@ last_prompt = None
 
 # ===== SYSTÈME DE BUFFER DE PROMPTS PRÉ-GÉNÉRÉS =====
 # Structure: {"text": str, "tts_file": str}
-prompt_buffer = deque(maxlen=2)  # Buffer de 2 prompts prêts
+prompt_buffer = deque(maxlen=3)  # Buffer de 3 prompts prêts
 buffer_lock = asyncio.Lock()  # Lock pour éviter les race conditions
 is_generating = False  # Flag pour savoir si une génération est en cours
 
@@ -158,14 +186,21 @@ async def play_audio_file(voice_client, audio_file="kaamelott.mp3"):
         return False
     
     try:
+        # Obtenir la durée exacte du fichier
+        duration = get_audio_duration(audio_file)
+        
         audio_source = discord.FFmpegPCMAudio(audio_file)
         voice_client.play(audio_source)
         
-        # Attendre la fin
-        while voice_client.is_playing():
-            await asyncio.sleep(0.1)
+        # Attendre la fin avec la durée exacte si disponible
+        if duration:
+            await asyncio.sleep(duration + 0.3)  # +0.3s de marge
+        else:
+            # Fallback sur la méthode is_playing()
+            while voice_client.is_playing():
+                await asyncio.sleep(0.1)
+            await asyncio.sleep(0.3)
         
-        await asyncio.sleep(0.3)
         return True
         
     except Exception as e:
@@ -263,16 +298,24 @@ async def play_tts_file(voice_client, tts_file, delete_after=True):
             print("❌ Le fichier TTS n'existe pas")
             return False
         
-        print(f"🔊 Lecture du fichier TTS ({os.path.getsize(tts_file)} bytes)...")
+        file_size = os.path.getsize(tts_file)
+        print(f"🔊 Lecture du fichier TTS ({file_size} bytes)...")
+        
+        # Obtenir la durée exacte du fichier
+        duration = get_audio_duration(tts_file)
         
         audio_source = discord.FFmpegPCMAudio(tts_file)
         voice_client.play(audio_source)
         
-        # Attendre la fin avec timeout
-        timeout = 0
-        while voice_client.is_playing() and timeout < 120:
-            await asyncio.sleep(0.1)
-            timeout += 0.1
+        # Attendre la fin avec la durée exacte si disponible
+        if duration:
+            await asyncio.sleep(duration + 0.5)  # +0.5s de marge pour le TTS
+        else:
+            # Fallback sur la méthode is_playing() avec timeout
+            timeout = 0
+            while voice_client.is_playing() and timeout < 120:
+                await asyncio.sleep(0.1)
+                timeout += 0.1
         
         print("✅ Lecture TTS terminée")
         return True
@@ -320,13 +363,13 @@ async def generate_and_buffer_prompt():
         if is_generating:
             print("⏳ Génération déjà en cours, skip...")
             return False
-        if len(prompt_buffer) >= 2:
+        if len(prompt_buffer) >= 3:
             print("📦 Buffer déjà plein, skip...")
             return False
         is_generating = True
     
     try:
-        print(f"🔄 Génération d'un nouveau prompt pour le buffer (actuel: {len(prompt_buffer)}/2)...")
+        print(f"🔄 Génération d'un nouveau prompt pour le buffer (actuel: {len(prompt_buffer)}/3)...")
         
         # 1. Construire et générer le texte
         prompt = build_chaos_prompt()
@@ -353,7 +396,7 @@ async def generate_and_buffer_prompt():
                 "text": chaos_text,
                 "tts_file": tts_file
             })
-            print(f"✅ Prompt ajouté au buffer (maintenant: {len(prompt_buffer)}/2)")
+            print(f"✅ Prompt ajouté au buffer (maintenant: {len(prompt_buffer)}/3)")
         
         return True
             
@@ -366,8 +409,8 @@ async def generate_and_buffer_prompt():
 
 
 async def refill_buffer():
-    """Remplit le buffer jusqu'à 2 prompts (lance une seule génération à la fois)"""
-    if len(prompt_buffer) < 2:
+    """Remplit le buffer jusqu'à 3 prompts (lance une seule génération à la fois)"""
+    if len(prompt_buffer) < 3:
         await generate_and_buffer_prompt()
     # Si encore besoin après, la background task s'en chargera
 
@@ -385,16 +428,17 @@ async def background_buffer_task():
     await bot.wait_until_ready()
     print("🔄 Démarrage de la tâche de remplissage du buffer...")
     
-    # Remplissage initial (2 prompts)
+    # Remplissage initial (3 prompts)
     await generate_and_buffer_prompt()
     await generate_and_buffer_prompt()
-    print(f"✅ Buffer initial rempli: {len(prompt_buffer)}/2 prompts prêts")
+    await generate_and_buffer_prompt()
+    print(f"✅ Buffer initial rempli: {len(prompt_buffer)}/3 prompts prêts")
     
     # Boucle de maintenance
     while not bot.is_closed():
         try:
             # Vérifier si on a besoin de regénérer
-            if len(prompt_buffer) < 2 and not is_generating:
+            if len(prompt_buffer) < 3 and not is_generating:
                 await generate_and_buffer_prompt()
             await asyncio.sleep(2)  # Vérifie toutes les 2 secondes
         except Exception as e:
@@ -408,7 +452,7 @@ async def on_ready():
     print(f'📦 Serveurs: {len(bot.guilds)}')
     print(f'🤖 Modèle Gemini: gemini-3-pro-preview')
     print(f'🔑 Clés ElevenLabs: {len(ELEVENLABS_API_KEYS)} clés chargées')
-    print(f'📦 Système de buffer activé (2 prompts en avance)')
+    print(f'📦 Système de buffer activé (3 prompts en avance)')
     
     # Démarrer la tâche de fond pour maintenir le buffer
     bot.loop.create_task(background_buffer_task())
@@ -430,7 +474,7 @@ async def chaos(ctx):
         # On a un prompt prêt !
         chaos_text = buffered["text"]
         tts_file = buffered["tts_file"]
-        print(f"⚡ Utilisation d'un prompt buffered (reste: {len(prompt_buffer)}/2)")
+        print(f"⚡ Utilisation d'un prompt buffered (reste: {len(prompt_buffer)}/3)")
         
         # 2. Se connecter au canal vocal IMMÉDIATEMENT
         voice_client = await ensure_voice_connection(ctx)
@@ -517,7 +561,7 @@ async def buffer_status(ctx):
     
     await ctx.send(f"""📦 **Statut du Buffer:**
 
-**Prompts en stock:** {len(prompt_buffer)}/2
+**Prompts en stock:** {len(prompt_buffer)}/3
 **Génération:** {status}
 
 Le buffer pré-génère des prompts pour que `!chaos` soit instantané !""")
