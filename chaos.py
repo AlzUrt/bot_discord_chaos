@@ -69,7 +69,7 @@ last_prompt = None
 
 # ===== SYSTÈME DE BUFFER DE PROMPTS PRÉ-GÉNÉRÉS =====
 # Structure: {"text": str, "tts_file": str}
-prompt_buffer = deque(maxlen=3)  # Buffer de 3 prompts prêts
+prompt_buffer = deque(maxlen=2)  # Buffer de 2 prompts prêts
 buffer_lock = asyncio.Lock()  # Lock pour éviter les race conditions
 is_generating = False  # Flag pour savoir si une génération est en cours
 
@@ -315,14 +315,18 @@ async def generate_and_buffer_prompt():
     """Génère un prompt complet (texte + TTS) et l'ajoute au buffer"""
     global is_generating, last_prompt
     
+    # Vérifier si on peut générer (sans bloquer)
     async with buffer_lock:
         if is_generating:
             print("⏳ Génération déjà en cours, skip...")
-            return
+            return False
+        if len(prompt_buffer) >= 2:
+            print("📦 Buffer déjà plein, skip...")
+            return False
         is_generating = True
     
     try:
-        print(f"🔄 Génération d'un nouveau prompt pour le buffer (actuel: {len(prompt_buffer)}/3)...")
+        print(f"🔄 Génération d'un nouveau prompt pour le buffer (actuel: {len(prompt_buffer)}/2)...")
         
         # 1. Construire et générer le texte
         prompt = build_chaos_prompt()
@@ -333,7 +337,7 @@ async def generate_and_buffer_prompt():
         
         if not chaos_text:
             print("❌ Échec génération texte pour le buffer")
-            return
+            return False
         
         # 2. Générer le TTS
         print("🎤 Génération du TTS pour le buffer...")
@@ -341,7 +345,7 @@ async def generate_and_buffer_prompt():
         
         if not tts_file:
             print("❌ Échec génération TTS pour le buffer")
-            return
+            return False
         
         # 3. Ajouter au buffer
         async with buffer_lock:
@@ -349,19 +353,23 @@ async def generate_and_buffer_prompt():
                 "text": chaos_text,
                 "tts_file": tts_file
             })
-            print(f"✅ Prompt ajouté au buffer (maintenant: {len(prompt_buffer)}/3)")
+            print(f"✅ Prompt ajouté au buffer (maintenant: {len(prompt_buffer)}/2)")
+        
+        return True
             
     except Exception as e:
         print(f"❌ Erreur lors de la génération pour le buffer: {e}")
+        return False
     finally:
         async with buffer_lock:
             is_generating = False
 
 
 async def refill_buffer():
-    """Remplit le buffer jusqu'à 3 prompts"""
-    while len(prompt_buffer) < 3:
+    """Remplit le buffer jusqu'à 2 prompts (lance une seule génération à la fois)"""
+    if len(prompt_buffer) < 2:
         await generate_and_buffer_prompt()
+    # Si encore besoin après, la background task s'en chargera
 
 
 async def get_buffered_prompt():
@@ -377,16 +385,18 @@ async def background_buffer_task():
     await bot.wait_until_ready()
     print("🔄 Démarrage de la tâche de remplissage du buffer...")
     
-    # Remplissage initial
-    await refill_buffer()
-    print(f"✅ Buffer initial rempli: {len(prompt_buffer)}/3 prompts prêts")
+    # Remplissage initial (2 prompts)
+    await generate_and_buffer_prompt()
+    await generate_and_buffer_prompt()
+    print(f"✅ Buffer initial rempli: {len(prompt_buffer)}/2 prompts prêts")
     
     # Boucle de maintenance
     while not bot.is_closed():
         try:
-            if len(prompt_buffer) < 3:
+            # Vérifier si on a besoin de regénérer
+            if len(prompt_buffer) < 2 and not is_generating:
                 await generate_and_buffer_prompt()
-            await asyncio.sleep(1)  # Vérifie toutes les secondes
+            await asyncio.sleep(2)  # Vérifie toutes les 2 secondes
         except Exception as e:
             print(f"❌ Erreur dans la tâche de buffer: {e}")
             await asyncio.sleep(5)
@@ -398,7 +408,7 @@ async def on_ready():
     print(f'📦 Serveurs: {len(bot.guilds)}')
     print(f'🤖 Modèle Gemini: gemini-3-pro-preview')
     print(f'🔑 Clés ElevenLabs: {len(ELEVENLABS_API_KEYS)} clés chargées')
-    print(f'📦 Système de buffer activé (3 prompts en avance)')
+    print(f'📦 Système de buffer activé (2 prompts en avance)')
     
     # Démarrer la tâche de fond pour maintenir le buffer
     bot.loop.create_task(background_buffer_task())
@@ -418,13 +428,37 @@ async def chaos(ctx):
     
     if buffered:
         # On a un prompt prêt !
-        await ctx.send("🎲 *Le chaos est déjà prêt...*")
         chaos_text = buffered["text"]
         tts_file = buffered["tts_file"]
-        print(f"⚡ Utilisation d'un prompt buffered (reste: {len(prompt_buffer)}/3)")
+        print(f"⚡ Utilisation d'un prompt buffered (reste: {len(prompt_buffer)}/2)")
         
-        # Lancer le remplissage du buffer en arrière-plan
-        bot.loop.create_task(refill_buffer())
+        # 2. Se connecter au canal vocal IMMÉDIATEMENT
+        voice_client = await ensure_voice_connection(ctx)
+        if not voice_client:
+            # Nettoyer le fichier TTS si connexion échouée
+            if os.path.exists(tts_file):
+                os.remove(tts_file)
+            return
+        
+        # 3. Lancer le remplissage du buffer en arrière-plan (pendant qu'on joue)
+        bot.loop.create_task(generate_and_buffer_prompt())
+        
+        # 4. Jouer le son d'intro (kaamelott)
+        await play_audio_file(voice_client, "kaamelott.mp3")
+        
+        # 5. Envoyer le texte sur Discord
+        await ctx.send(f"📜 **Le Chaos a parlé:**\n\n{chaos_text}")
+        
+        # 6. Jouer le TTS
+        await play_tts_file(voice_client, tts_file, delete_after=True)
+        
+        # 7. Ajouter à l'historique
+        generated_history.append(chaos_text)
+        
+        # 8. Déconnecter le bot
+        await voice_client.disconnect()
+        print("👋 Bot déconnecté du canal vocal")
+        
     else:
         # Buffer vide, on doit générer à la volée (fallback)
         await ctx.send("🎲 *Invocation du chaos en cours... (buffer vide, génération en cours)*")
@@ -447,32 +481,31 @@ async def chaos(ctx):
             await ctx.send("❌ Erreur lors de la génération du TTS")
             return
         
-        # Relancer le remplissage du buffer
+        # Se connecter au canal vocal
+        voice_client = await ensure_voice_connection(ctx)
+        if not voice_client:
+            if os.path.exists(tts_file):
+                os.remove(tts_file)
+            return
+        
+        # Jouer le son d'intro
+        await play_audio_file(voice_client, "kaamelott.mp3")
+        
+        # Envoyer le texte
+        await ctx.send(f"📜 **Le Chaos a parlé:**\n\n{chaos_text}")
+        
+        # Jouer le TTS
+        await play_tts_file(voice_client, tts_file, delete_after=True)
+        
+        # Ajouter à l'historique
+        generated_history.append(chaos_text)
+        
+        # Déconnecter
+        await voice_client.disconnect()
+        print("👋 Bot déconnecté du canal vocal")
+        
+        # Relancer le remplissage du buffer après
         bot.loop.create_task(refill_buffer())
-    
-    # 2. Se connecter au canal vocal
-    voice_client = await ensure_voice_connection(ctx)
-    if not voice_client:
-        # Nettoyer le fichier TTS si connexion échouée
-        if os.path.exists(tts_file):
-            os.remove(tts_file)
-        return
-    
-    # 3. Jouer le son d'intro (kaamelott)
-    await play_audio_file(voice_client, "kaamelott.mp3")
-    
-    # 4. Envoyer le texte sur Discord
-    await ctx.send(f"📜 **Le Chaos a parlé:**\n\n{chaos_text}")
-    
-    # 5. Jouer le TTS
-    await play_tts_file(voice_client, tts_file, delete_after=True)
-    
-    # 6. Ajouter à l'historique
-    generated_history.append(chaos_text)
-    
-    # 7. Déconnecter le bot
-    await voice_client.disconnect()
-    print("👋 Bot déconnecté du canal vocal")
 
 
 @bot.command(name='buffer')
@@ -484,7 +517,7 @@ async def buffer_status(ctx):
     
     await ctx.send(f"""📦 **Statut du Buffer:**
 
-**Prompts en stock:** {len(prompt_buffer)}/3
+**Prompts en stock:** {len(prompt_buffer)}/2
 **Génération:** {status}
 
 Le buffer pré-génère des prompts pour que `!chaos` soit instantané !""")
