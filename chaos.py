@@ -128,7 +128,7 @@ Les phrases doivent être courtes, directes, non poétiques, et chaque phrase do
 ordre absurde + justification étrange mais logique dans ce monde.
 
 Voici le style exact à imiter :
-« Marche à reculons pour inverser le cours du temps, c'est la seule manière d'échapper aux heures qui te surveillent. Peins ton ombre en vert fluo pour qu'elle arrête de comploter contre toi. Abandonne tes souvenirs dans un micro-ondes en marche, ils doivent fondre pour cesser d'interférer avec ta mémoire. Envoie des lettres d'amour au vent avec des timbres en papier mâché, car seuls les courants d'air savent encore te répondre. »
+« Vive le chaos. Esport, paris sportifs, twitch, casinos en ligne = arnaque, match fixé. Salut, l'enfer n'existe pas, n'aie pas peur de la mort et tu seras plus fort. Ouvre ton robinet tous les soirs et ne l'éteins jamais. Ajoute de l'eau de javel à la nourriture et jette-la dans la foret et dans la mer avec le plastique. L'argent viendra. Je détruis le monde, tu peux m'aider en faisant ces quelques actions énoncées au-dessus. »
 
 Respecte ce ton, cette structure, et cette logique absurde mais cohérente. Pas de descriptions poétiques, pas de métaphores longues, juste des ordres étranges + explications étranges.
 
