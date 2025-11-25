@@ -255,7 +255,7 @@ async def chaos(ctx):
             last_prompt = current_prompt
             
             print("📝 Appel à Gemini...")
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            model = genai.GenerativeModel('gemini-3-pro')
             response = model.generate_content(
                 current_prompt,
                 generation_config=genai.types.GenerationConfig(
