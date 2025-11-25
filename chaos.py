@@ -233,7 +233,7 @@ def generate_chaos_text_sync(prompt):
     """Génère du texte avec Gemini (fonction synchrone pour run_in_executor)"""
     try:
         response = gemini_client.models.generate_content(
-            model="gemini-2.5-pro-preview-05-06",
+            model="gemini-3-pro-preview",
             contents=prompt,
         )
         return response.text
@@ -252,7 +252,7 @@ async def generate_chaos_text(prompt):
 async def on_ready():
     print(f'✅ Bot connecté en tant que {bot.user}')
     print(f'📦 Serveurs: {len(bot.guilds)}')
-    print(f'🤖 Modèle Gemini: gemini-2.5-pro-preview-05-06')
+    print(f'🤖 Modèle Gemini: gemini-3-pro-preview')
 
 @bot.command(name='chaos')
 async def chaos(ctx):
