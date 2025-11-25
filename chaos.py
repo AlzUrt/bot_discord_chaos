@@ -69,7 +69,7 @@ Voici le style exact à imiter :
 
 Respecte ce ton, cette structure, et cette logique absurde mais cohérente. Pas de descriptions poétiques, pas de métaphores longues, juste des ordres étranges + explications étranges.
 
-IMPORTANT: Les phrases précédentes suivantes ont DÉJÀ été générées. Tu DOIS absolument éviter de les reproduire ou de générer quelque chose de similaire. Crée quelque chose de complètement différent :
+IMPORTANT: Les phrases suivantes ont DÉJÀ été générées. Tu DOIS absolument éviter de les reproduire ou de générer quelque chose de similaire. Crée quelque chose de complètement différent :
 {history}
 
 Ne me fait pas de liste, ne numérote pas les phrases, ne les sépare pas par des tirets. Écris simplement le paragraphe avec les phrases à la suite les unes des autres.
@@ -137,18 +137,12 @@ async def play_audio_file(voice_client, audio_file="kaamelott.mp3"):
         print(f"Erreur lecture audio: {e}")
         return False
 
-async def play_tts(voice_client, text):
-    """Génère et joue un fichier TTS avec ElevenLabs sans déconnecter"""
+def generate_tts_file_sync(text):
+    """Génère un fichier TTS avec ElevenLabs (fonction synchrone pour run_in_executor)"""
     temp_file = None
     
     try:
-        # Vérifier que le voice_client est toujours connecté
-        if not voice_client or not voice_client.is_connected():
-            print("❌ Le bot n'est pas connecté au canal vocal")
-            return False
-        
-        # Générer le TTS avec ElevenLabs
-        print(f"Génération TTS avec ElevenLabs (vitesse: {TTS_SPEED}, stabilité: {TTS_STABILITY})...")
+        print(f"🎤 Génération TTS avec ElevenLabs (vitesse: {TTS_SPEED}, stabilité: {TTS_STABILITY})...")
         audio = client.text_to_speech.convert(
             text=text,
             voice_id=TTS_VOICE_ID,
@@ -163,56 +157,78 @@ async def play_tts(voice_client, text):
             ),
         )
         
-        # Sauvegarder ENTIÈREMENT dans un fichier temporaire avant de jouer
-        print("Écriture du fichier TTS...")
+        # Sauvegarder dans un fichier temporaire
         with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
             temp_file = tmp.name
-            # Consommer ENTIÈREMENT l'itérateur
             chunks_written = 0
             for chunk in audio:
                 tmp.write(chunk)
                 chunks_written += 1
-            print(f"✅ {chunks_written} chunks écrits")
+            print(f"✅ TTS: {chunks_written} chunks écrits")
         
-        # Vérifier que le fichier existe et n'est pas vide
         if not os.path.exists(temp_file) or os.path.getsize(temp_file) == 0:
             print("❌ Le fichier TTS est vide ou n'existe pas")
+            return None
+        
+        print(f"✅ Fichier TTS prêt ({os.path.getsize(temp_file)} bytes)")
+        return temp_file
+        
+    except Exception as e:
+        print(f"❌ Erreur génération TTS: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
+        return None
+
+
+async def generate_tts_file(text):
+    """Génère un fichier TTS avec ElevenLabs (async wrapper)"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, generate_tts_file_sync, text)
+
+
+async def play_tts_file(voice_client, tts_file):
+    """Joue un fichier TTS déjà généré"""
+    try:
+        if not voice_client or not voice_client.is_connected():
+            print("❌ Le bot n'est pas connecté au canal vocal")
             return False
         
-        print(f"Fichier TTS créé ({os.path.getsize(temp_file)} bytes), lecture en cours...")
-        
-        # Vérifier la connexion avant de jouer
-        if not voice_client.is_connected():
-            print("❌ Perte de connexion vocale avant la lecture TTS")
+        if not tts_file or not os.path.exists(tts_file):
+            print("❌ Le fichier TTS n'existe pas")
             return False
         
-        # Jouer le son
-        audio_source = discord.FFmpegPCMAudio(temp_file)
+        print(f"🔊 Lecture du fichier TTS ({os.path.getsize(tts_file)} bytes)...")
+        
+        audio_source = discord.FFmpegPCMAudio(tts_file)
         voice_client.play(audio_source)
-        print("Lecture du TTS lancée...")
         
         # Attendre la fin avec timeout
         timeout = 0
-        while voice_client.is_playing() and timeout < 120:  # Max 2 minutes
+        while voice_client.is_playing() and timeout < 120:
             await asyncio.sleep(0.2)
             timeout += 0.2
         
-        print("Lecture TTS terminée")
-        await asyncio.sleep(0.5)
+        print("✅ Lecture TTS terminée")
+        await asyncio.sleep(0.3)
         return True
         
     except Exception as e:
-        print(f"❌ Erreur TTS: {type(e).__name__}: {e}")
+        print(f"❌ Erreur lecture TTS: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
         return False
     finally:
         # Nettoyer le fichier temporaire
-        if temp_file and os.path.exists(temp_file):
+        if tts_file and os.path.exists(tts_file):
             try:
-                await asyncio.sleep(0.5)  # Attendre un peu avant de supprimer
-                os.remove(temp_file)
-                print(f"Fichier temporaire supprimé")
+                await asyncio.sleep(0.3)
+                os.remove(tts_file)
+                print(f"🗑️ Fichier temporaire supprimé")
             except Exception as e:
                 print(f"Erreur suppression fichier: {e}")
 
@@ -235,6 +251,8 @@ async def chaos(ctx):
         return
     
     print(f"✅ Connecté au canal vocal: {voice_client.channel}")
+    
+    tts_file = None  # Pour le nettoyage en cas d'erreur
     
     try:
         async with ctx.typing():
@@ -268,11 +286,25 @@ async def chaos(ctx):
             # Ajouter le texte à l'historique
             generated_history.append(generated_text)
             
-            # Envoyer le message
+            # 🚀 Lancer la génération TTS en arrière-plan AVANT d'envoyer le message
+            print("🚀 Lancement de la génération TTS en arrière-plan...")
+            tts_task = asyncio.create_task(generate_tts_file(generated_text))
+            
+            # Envoyer le message dans le chat
             await ctx.send(generated_text)
         
-        # Jouer le son Kaamelott
-        print("🎵 Lecture de Kaamelott...")
+        # ⏳ Attendre que le TTS soit prêt
+        print("⏳ Attente de la fin de génération TTS...")
+        tts_file = await tts_task
+        
+        if not tts_file:
+            print("❌ La génération TTS a échoué")
+            await ctx.send("❌ Erreur lors de la génération TTS")
+            return
+        
+        print("✅ TTS prêt, lecture de Kaamelott...")
+        
+        # 🎵 Jouer le son Kaamelott (le TTS est déjà prêt!)
         kaamelott_ok = await play_audio_file(voice_client, "kaamelott.mp3")
         if kaamelott_ok:
             print("✅ Kaamelott joué")
@@ -285,11 +317,10 @@ async def chaos(ctx):
             await ctx.send("❌ Le bot s'est déconnecté")
             return
         
-        print(f"✅ Encore connecté au canal: {voice_client.channel}")
-        
-        # Lire le texte à voix haute
-        print("🎤 Lecture du TTS...")
-        tts_ok = await play_tts(voice_client, generated_text)
+        # 🔊 Lire le TTS immédiatement (fichier déjà prêt!)
+        print("🔊 Lecture du TTS...")
+        tts_ok = await play_tts_file(voice_client, tts_file)
+        tts_file = None  # Le fichier est nettoyé par play_tts_file
         
         if tts_ok:
             print("✅ TTS joué avec succès")
@@ -308,6 +339,14 @@ async def chaos(ctx):
         traceback.print_exc()
         await ctx.send(f"❌ Erreur: {str(e)}")
     finally:
+        # Nettoyer le fichier TTS si nécessaire
+        if tts_file and os.path.exists(tts_file):
+            try:
+                os.remove(tts_file)
+                print(f"🗑️ Fichier TTS nettoyé (erreur)")
+            except:
+                pass
+        
         # S'assurer qu'on est déconnecté en cas d'erreur
         voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
         if voice_client and voice_client.is_connected():
