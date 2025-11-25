@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-import google.generativeai as genai
+from google import genai
 import os
 from dotenv import load_dotenv
 from collections import deque
@@ -17,11 +17,11 @@ DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
 
-# Initialiser Gemini
-genai.configure(api_key=GEMINI_API_KEY)
+# Initialiser le client Gemini (nouvelle API)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Initialiser ElevenLabs
-client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
 # Créer le bot
 intents = discord.Intents.default()
@@ -143,7 +143,7 @@ def generate_tts_file_sync(text):
     
     try:
         print(f"🎤 Génération TTS avec ElevenLabs (vitesse: {TTS_SPEED}, stabilité: {TTS_STABILITY})...")
-        audio = client.text_to_speech.convert(
+        audio = elevenlabs_client.text_to_speech.convert(
             text=text,
             voice_id=TTS_VOICE_ID,
             model_id="eleven_multilingual_v2",
@@ -210,153 +210,88 @@ async def play_tts_file(voice_client, tts_file):
         # Attendre la fin avec timeout
         timeout = 0
         while voice_client.is_playing() and timeout < 120:
-            await asyncio.sleep(0.2)
-            timeout += 0.2
+            await asyncio.sleep(0.1)
+            timeout += 0.1
         
         print("✅ Lecture TTS terminée")
-        await asyncio.sleep(0.3)
         return True
         
     except Exception as e:
         print(f"❌ Erreur lecture TTS: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
         return False
     finally:
         # Nettoyer le fichier temporaire
         if tts_file and os.path.exists(tts_file):
             try:
-                await asyncio.sleep(0.3)
                 os.remove(tts_file)
-                print(f"🗑️ Fichier temporaire supprimé")
-            except Exception as e:
-                print(f"Erreur suppression fichier: {e}")
+                print("🧹 Fichier temporaire supprimé")
+            except:
+                pass
+
+
+def generate_chaos_text_sync(prompt):
+    """Génère du texte avec Gemini (fonction synchrone pour run_in_executor)"""
+    try:
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-pro-preview-05-06",
+            contents=prompt,
+        )
+        return response.text
+    except Exception as e:
+        print(f"❌ Erreur Gemini: {type(e).__name__}: {e}")
+        return None
+
+
+async def generate_chaos_text(prompt):
+    """Génère du texte avec Gemini (async wrapper)"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, generate_chaos_text_sync, prompt)
+
 
 @bot.event
 async def on_ready():
-    print(f'{bot.user} s\'est connecté à Discord!')
+    print(f'✅ Bot connecté en tant que {bot.user}')
+    print(f'📦 Serveurs: {len(bot.guilds)}')
+    print(f'🤖 Modèle Gemini: gemini-2.5-pro-preview-05-06')
 
 @bot.command(name='chaos')
 async def chaos(ctx):
-    """Génère un texte aléatoire avec Gemini, joue un son, puis lit le texte à voix haute"""
+    """Génère un texte absurde avec Gemini et le lit à voix haute"""
     global last_prompt
     
-    print("\n" + "="*50)
-    print("🎮 Commande !chaos démarrée")
-    print("="*50)
+    # Vérifier la connexion vocale
+    voice_client = await ensure_voice_connection(ctx)
+    if not voice_client:
+        return
     
-    tts_file = None  # Pour le nettoyage en cas d'erreur
-    voice_client = None
+    # Jouer le son d'intro
+    await ctx.send("🎲 *Invocation du chaos en cours...*")
+    await play_audio_file(voice_client, "kaamelott.mp3")
     
-    try:
-        async with ctx.typing():
-            # 1. Construire le prompt et appeler Gemini
-            current_prompt = build_chaos_prompt()
-            last_prompt = current_prompt
-            
-            print("📝 Appel à Gemini...")
-            model = genai.GenerativeModel('gemini-3-pro')
-            response = model.generate_content(
-                current_prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.8,
-                    max_output_tokens=300
-                )
-            )
-            
-            if not response or not response.text:
-                await ctx.send("⚠️ La réponse de Gemini était vide. Réessaye avec `!chaos`")
-                print("❌ Réponse Gemini vide")
-                return
-            
-            generated_text = response.text.strip()
-            print(f"✅ Texte généré: {generated_text[:100]}...")
-            
-            # Ajouter le texte à l'historique
-            generated_history.append(generated_text)
-            
-            # 2. 🚀 Lancer la génération TTS en arrière-plan
-            print("🚀 Lancement de la génération TTS en arrière-plan...")
-            tts_task = asyncio.create_task(generate_tts_file(generated_text))
-            
-            # 3. ⏳ Attendre que le TTS soit prêt
-            print("⏳ Attente de la fin de génération TTS...")
-            tts_file = await tts_task
-            
-            if not tts_file:
-                print("❌ La génération TTS a échoué")
-                await ctx.send("❌ Erreur lors de la génération TTS")
-                return
-            
-            print("✅ TTS prêt!")
-        
-        # 4. Connexion au vocal
-        voice_client = await ensure_voice_connection(ctx)
-        if not voice_client:
-            print("❌ Impossible de se connecter au canal vocal")
-            return
-        
-        print(f"✅ Connecté au canal vocal: {voice_client.channel}")
-        
-        # 5. 🎵 Jouer le son Kaamelott
-        print("🎵 Lecture de Kaamelott...")
-        kaamelott_ok = await play_audio_file(voice_client, "kaamelott.mp3")
-        if kaamelott_ok:
-            print("✅ Kaamelott joué")
-        else:
-            print("⚠️ Kaamelott n'a pas pu être joué")
-        
-        # 6. Envoyer le message dans le chat
-        await ctx.send(generated_text)
-        
-        # Vérifier la connexion avant TTS
-        if not voice_client.is_connected():
-            print("❌ Perte de connexion après Kaamelott!")
-            await ctx.send("❌ Le bot s'est déconnecté")
-            return
-        
-        # 7. 🔊 Lire le TTS immédiatement (fichier déjà prêt!)
-        print("🔊 Lecture du TTS...")
-        tts_ok = await play_tts_file(voice_client, tts_file)
-        tts_file = None  # Le fichier est nettoyé par play_tts_file
-        
-        if tts_ok:
-            print("✅ TTS joué avec succès")
-        else:
-            print("❌ TTS n'a pas pu être joué")
-            await ctx.send("❌ Erreur lors de la lecture TTS")
-        
-        # 8. Déconnecter automatiquement après avoir fini
-        print("🔌 Déconnexion du canal vocal...")
-        await voice_client.disconnect()
-        print("✅ Déconnecté")
-            
-    except Exception as e:
-        print(f"❌ Erreur: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        await ctx.send(f"❌ Erreur: {str(e)}")
-    finally:
-        # Nettoyer le fichier TTS si nécessaire
-        if tts_file and os.path.exists(tts_file):
-            try:
-                os.remove(tts_file)
-                print(f"🗑️ Fichier TTS nettoyé (erreur)")
-            except:
-                pass
-        
-        # S'assurer qu'on est déconnecté en cas d'erreur
-        voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-        if voice_client and voice_client.is_connected():
-            try:
-                print("🔌 Déconnexion forcée...")
-                await voice_client.disconnect()
-            except Exception as e:
-                print(f"Erreur déconnexion: {e}")
-        
-        print("="*50)
-        print("✅ Commande !chaos terminée\n")
-
+    # Construire le prompt
+    prompt = build_chaos_prompt()
+    last_prompt = prompt
+    
+    # Générer le texte
+    print("🤖 Génération du texte avec Gemini...")
+    chaos_text = await generate_chaos_text(prompt)
+    
+    if not chaos_text:
+        await ctx.send("❌ Erreur lors de la génération du texte")
+        return
+    
+    # Ajouter à l'historique
+    generated_history.append(chaos_text)
+    
+    # Envoyer le texte sur Discord
+    await ctx.send(f"📜 **Le Chaos a parlé:**\n\n{chaos_text}")
+    
+    # Générer et jouer le TTS
+    tts_file = await generate_tts_file(chaos_text)
+    if tts_file:
+        await play_tts_file(voice_client, tts_file)
+    else:
+        await ctx.send("⚠️ Impossible de générer l'audio TTS")
 
 @bot.command(name='disconnect')
 async def disconnect(ctx):
@@ -365,20 +300,16 @@ async def disconnect(ctx):
     
     if voice_client and voice_client.is_connected():
         await voice_client.disconnect()
-        await ctx.send("✅ Déconnecté du canal vocal")
+        await ctx.send("👋 Déconnecté du canal vocal")
     else:
-        await ctx.send("❌ Le bot n'est pas connecté à un canal vocal")
+        await ctx.send("❌ Je ne suis pas connecté à un canal vocal")
 
 @bot.command(name='speed')
 async def speed(ctx, new_speed: float = None):
     """Change la vitesse de lecture TTS
     
-    Utilisation: !speed [vitesse]
-    Vitesse: 0.5 à 2.0 (défaut: 1.0)
-    - 0.5 = très lent
-    - 1.0 = normal
-    - 1.5 = rapide
-    - 2.0 = très rapide
+    Utilisation: !speed [valeur]
+    Valeurs: 0.5 à 2.0 (défaut: 1.0)
     
     Exemple: !speed 1.5
     """
@@ -388,27 +319,24 @@ async def speed(ctx, new_speed: float = None):
         await ctx.send(f"🎚️ **Vitesse actuelle:** {TTS_SPEED}x\n\nUtilise `!speed [valeur]` pour changer\nValeurs: 0.5 à 2.0")
         return
     
-    # Vérifier que la vitesse est dans les limites
     if new_speed < 0.5 or new_speed > 2.0:
         await ctx.send(f"❌ Vitesse invalide: `{new_speed}`\n\n**Plage autorisée:** 0.5 à 2.0")
         return
     
     TTS_SPEED = new_speed
-    await ctx.send(f"✅ Vitesse de lecture définie à: **{TTS_SPEED}x**")
+    await ctx.send(f"✅ Vitesse définie à: **{TTS_SPEED}x**")
 
 @bot.command(name='voice')
 async def voice(ctx, voice_name: str = None):
     """Change la voix TTS
     
-    Utilisation: !voice [nom_voix]
-    Voix disponibles: default, bella, adam, arnold, george, callum
+    Utilisation: !voice [nom]
     
-    Exemple: !voice bella
+    Voix disponibles: default, bella, adam, arnold, george, callum
     """
     global TTS_VOICE_ID
     
     if voice_name is None:
-        # Afficher la voix actuelle et les options disponibles
         current_voice = None
         for name, voice_id in VOICES_PRESETS.items():
             if voice_id == TTS_VOICE_ID:
@@ -416,7 +344,7 @@ async def voice(ctx, voice_name: str = None):
                 break
         
         voice_list = ", ".join(VOICES_PRESETS.keys())
-        await ctx.send(f"🎙️ **Voix actuelle:** {current_voice if current_voice else TTS_VOICE_ID}\n\n**Voix disponibles:** {voice_list}\n\nUtilise `!voice [nom]` pour changer")
+        await ctx.send(f"🎙️ **Voix actuelle:** {current_voice if current_voice else TTS_VOICE_ID}\n\n**Voix disponibles:** {voice_list}")
         return
     
     voice_name = voice_name.lower()
