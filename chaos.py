@@ -15,13 +15,42 @@ load_dotenv()
 # Configuration
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
+
+# ===== SYSTÈME DE ROTATION DES CLÉS ELEVENLABS =====
+ELEVENLABS_API_KEYS = [
+    os.getenv('ELEVENLABS_API_KEY'),
+    os.getenv('ELEVENLABS_API_KEY_2'),
+    os.getenv('ELEVENLABS_API_KEY_3'),
+    os.getenv('ELEVENLABS_API_KEY_4'),
+]
+# Filtrer les clés None ou vides
+ELEVENLABS_API_KEYS = [k for k in ELEVENLABS_API_KEYS if k]
+current_elevenlabs_key_index = 0
 
 # Initialiser le client Gemini (nouvelle API)
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Initialiser ElevenLabs
-elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+# Initialiser ElevenLabs avec la première clé
+elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEYS[0]) if ELEVENLABS_API_KEYS else None
+
+def rotate_elevenlabs_key():
+    """Passe à la clé API ElevenLabs suivante. Retourne True si on a pu changer, False si plus de clés."""
+    global current_elevenlabs_key_index, elevenlabs_client
+    
+    current_elevenlabs_key_index += 1
+    
+    if current_elevenlabs_key_index >= len(ELEVENLABS_API_KEYS):
+        print("❌ Toutes les clés ElevenLabs sont épuisées !")
+        return False
+    
+    new_key = ELEVENLABS_API_KEYS[current_elevenlabs_key_index]
+    elevenlabs_client = ElevenLabs(api_key=new_key)
+    print(f"🔄 Rotation vers la clé ElevenLabs #{current_elevenlabs_key_index + 1}/{len(ELEVENLABS_API_KEYS)}")
+    return True
+
+def get_current_key_info():
+    """Retourne les infos sur la clé actuelle"""
+    return f"Clé {current_elevenlabs_key_index + 1}/{len(ELEVENLABS_API_KEYS)}"
 
 # Créer le bot
 intents = discord.Intents.default()
@@ -143,12 +172,17 @@ async def play_audio_file(voice_client, audio_file="kaamelott.mp3"):
         print(f"Erreur lecture audio: {e}")
         return False
 
-def generate_tts_file_sync(text):
-    """Génère un fichier TTS avec ElevenLabs (fonction synchrone pour run_in_executor)"""
+def generate_tts_file_sync(text, retry_on_quota=True):
+    """Génère un fichier TTS avec ElevenLabs (fonction synchrone pour run_in_executor)
+    
+    Args:
+        text: Le texte à convertir en audio
+        retry_on_quota: Si True, essaie de changer de clé API en cas de quota dépassé
+    """
     temp_file = None
     
     try:
-        print(f"🎤 Génération TTS avec ElevenLabs (vitesse: {TTS_SPEED}, stabilité: {TTS_STABILITY})...")
+        print(f"🎤 Génération TTS avec ElevenLabs [{get_current_key_info()}] (vitesse: {TTS_SPEED}, stabilité: {TTS_STABILITY})...")
         audio = elevenlabs_client.text_to_speech.convert(
             text=text,
             voice_id=TTS_VOICE_ID,
@@ -180,7 +214,28 @@ def generate_tts_file_sync(text):
         return temp_file
         
     except Exception as e:
+        error_str = str(e)
         print(f"❌ Erreur génération TTS: {type(e).__name__}: {e}")
+        
+        # Vérifier si c'est une erreur de quota
+        if retry_on_quota and ("quota_exceeded" in error_str or "quota" in error_str.lower()):
+            print("⚠️ Quota dépassé, tentative de rotation de clé...")
+            
+            # Nettoyer le fichier temporaire si créé
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
+            
+            # Essayer de changer de clé
+            if rotate_elevenlabs_key():
+                print("🔄 Nouvelle clé activée, nouvelle tentative...")
+                return generate_tts_file_sync(text, retry_on_quota=True)
+            else:
+                print("❌ Plus de clés disponibles !")
+                return None
+        
         import traceback
         traceback.print_exc()
         if temp_file and os.path.exists(temp_file):
@@ -342,7 +397,8 @@ async def on_ready():
     print(f'✅ Bot connecté en tant que {bot.user}')
     print(f'📦 Serveurs: {len(bot.guilds)}')
     print(f'🤖 Modèle Gemini: gemini-3-pro-preview')
-    print(f'📦 Système de buffer activé (2 prompts en avance)')
+    print(f'🔑 Clés ElevenLabs: {len(ELEVENLABS_API_KEYS)} clés chargées')
+    print(f'📦 Système de buffer activé (3 prompts en avance)')
     
     # Démarrer la tâche de fond pour maintenir le buffer
     bot.loop.create_task(background_buffer_task())
@@ -432,6 +488,48 @@ async def buffer_status(ctx):
 **Génération:** {status}
 
 Le buffer pré-génère des prompts pour que `!chaos` soit instantané !""")
+
+
+@bot.command(name='keys')
+async def keys_status(ctx):
+    """Affiche le statut des clés API ElevenLabs"""
+    global current_elevenlabs_key_index
+    
+    total_keys = len(ELEVENLABS_API_KEYS)
+    current_key = current_elevenlabs_key_index + 1
+    remaining_keys = total_keys - current_elevenlabs_key_index
+    
+    # Construire la liste visuelle des clés
+    keys_visual = []
+    for i in range(total_keys):
+        if i < current_elevenlabs_key_index:
+            keys_visual.append(f"~~Clé {i+1}~~ ❌ (épuisée)")
+        elif i == current_elevenlabs_key_index:
+            keys_visual.append(f"**Clé {i+1}** ✅ (active)")
+        else:
+            keys_visual.append(f"Clé {i+1} 💤 (en réserve)")
+    
+    keys_list = "\n".join(keys_visual)
+    
+    await ctx.send(f"""🔑 **Statut des clés ElevenLabs:**
+
+{keys_list}
+
+**Clé active:** {current_key}/{total_keys}
+**Clés restantes:** {remaining_keys}
+
+Les clés sont automatiquement changées quand le quota est dépassé.""")
+
+
+@bot.command(name='reset-keys')
+async def reset_keys(ctx):
+    """Remet les clés API ElevenLabs à la première"""
+    global current_elevenlabs_key_index, elevenlabs_client
+    
+    current_elevenlabs_key_index = 0
+    elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEYS[0])
+    
+    await ctx.send(f"🔄 Clés ElevenLabs réinitialisées ! Utilisation de la clé 1/{len(ELEVENLABS_API_KEYS)}")
 
 
 @bot.command(name='refill')
@@ -694,6 +792,8 @@ async def tts_settings(ctx):
 **Commandes Principales:**
 `!chaos` - Génère un texte absurde et le lit à voix haute
 `!buffer` - Affiche le statut du buffer de prompts
+`!keys` - Affiche le statut des clés API ElevenLabs
+`!reset-keys` - Réinitialise les clés API à la première
 `!refill` - Force le remplissage du buffer
 `!prompt` - Affiche le dernier prompt envoyé à Gemini
 `!disconnect` - Déconnecte le bot du canal vocal
